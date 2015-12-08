@@ -746,6 +746,20 @@ gimplify_mem_ref_parts (gimple_stmt_iterator *gsi, struct mem_address *parts)
 					     true, GSI_SAME_STMT);
 }
 
+/* Return true if the STEP in PARTS gives a valid BASE + INDEX * STEP
+   address for type TYPE and if the offset is making it appear invalid.  */
+
+static bool
+keep_index_p (tree type, mem_address parts)
+{
+  if (!parts.base)
+    return false;
+
+  gcc_assert (!parts.symbol);
+  parts.offset = NULL_TREE;
+  return valid_mem_ref_p (TYPE_MODE (type), TYPE_ADDR_SPACE (type), &parts);
+}
+
 /* Creates and returns a TARGET_MEM_REF for address ADDR.  If necessary
    computations are emitted in front of GSI.  TYPE is the mode
    of created memory reference. IV_CAND is the selected iv candidate in ADDR,
@@ -809,7 +823,8 @@ create_mem_ref (gimple_stmt_iterator *gsi, tree type, aff_tree *addr,
      into:
        index' = index << step;
        [... + index' + ,,,].  */
-  if (parts.step && !integer_onep (parts.step))
+  bool scaled_p = (parts.step && !integer_onep (parts.step));
+  if (scaled_p && !keep_index_p (type, parts))
     {
       gcc_assert (parts.index);
       parts.index = force_gimple_operand_gsi (gsi,
@@ -821,6 +836,7 @@ create_mem_ref (gimple_stmt_iterator *gsi, tree type, aff_tree *addr,
       mem_ref = create_mem_ref_raw (type, alias_ptr_type, &parts, true);
       if (mem_ref)
 	return mem_ref;
+      scaled_p = false;
     }
 
   /* Add offset to invariant part by transforming address expression:
@@ -832,7 +848,9 @@ create_mem_ref (gimple_stmt_iterator *gsi, tree type, aff_tree *addr,
        index' = index + offset;
        [base + index']
      depending on which one is invariant.  */
-  if (parts.offset && !integer_zerop (parts.offset))
+  if (parts.offset
+      && !integer_zerop (parts.offset)
+      && (!var_in_base || !scaled_p))
     {
       tree old_base = unshare_expr (parts.base);
       tree old_index = unshare_expr (parts.index);
@@ -882,7 +900,7 @@ create_mem_ref (gimple_stmt_iterator *gsi, tree type, aff_tree *addr,
   /* Transform [base + index + ...] into:
        base' = base + index;
        [base' + ...].  */
-  if (parts.index)
+  if (parts.index && !scaled_p)
     {
       tmp = parts.index;
       parts.index = NULL_TREE;
