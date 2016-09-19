@@ -243,9 +243,12 @@ struct store_info
   /* Canonized MEM address for use by canon_true_dependence.  */
   rtx mem_addr;
 
-  /* The offset of the first and byte before the last byte associated
-     with the operation.  */
-  HOST_WIDE_INT begin, end;
+  /* The offset of the first byte associated with the operation.  */
+  HOST_WIDE_INT offset;
+
+  /* The number of bytes covered by the operation.  This is always exact
+     and known (rather than -1).  */
+  HOST_WIDE_INT width;
 
   union
     {
@@ -261,7 +264,7 @@ struct store_info
 	  bitmap bmap;
 
 	  /* Number of set bits (i.e. unneeded bytes) in BITMAP.  If it is
-	     equal to END - BEGIN, the whole store is unused.  */
+	     equal to WIDTH, the whole store is unused.  */
 	  int count;
 	} large;
     } positions_needed;
@@ -304,10 +307,11 @@ struct read_info_type
   /* The id of the mem group of the base address.  */
   int group_id;
 
-  /* The offset of the first and byte after the last byte associated
-     with the operation.  If begin == end == 0, the read did not have
-     a constant offset.  */
-  int begin, end;
+  /* The offset of the first byte associated with the operation.  */
+  HOST_WIDE_INT offset;
+
+  /* The number of bytes covered by the operation, or -1 if not known.  */
+  HOST_WIDE_INT width;
 
   /* The mem being read.  */
   rtx mem;
@@ -586,6 +590,18 @@ static bitmap kill_on_calls;
 
 /* The number of bits used in the global bitmaps.  */
 static unsigned int current_position;
+
+/* Print offset range [OFFSET, OFFSET + WIDTH) to FILE.  */
+
+static void
+print_range (FILE *file, poly_int64 offset, poly_int64 width)
+{
+  fprintf (file, "[");
+  print_dec (offset, file, SIGNED);
+  fprintf (file, "..");
+  print_dec (offset + width, file, SIGNED);
+  fprintf (file, ")");
+}
 
 /*----------------------------------------------------------------------------
    Zeroth step.
@@ -1212,10 +1228,9 @@ set_all_positions_unneeded (store_info *s_info)
 {
   if (__builtin_expect (s_info->is_large, false))
     {
-      int pos, end = s_info->end - s_info->begin;
-      for (pos = 0; pos < end; pos++)
-	bitmap_set_bit (s_info->positions_needed.large.bmap, pos);
-      s_info->positions_needed.large.count = end;
+      bitmap_set_range (s_info->positions_needed.large.bmap,
+			0, s_info->width);
+      s_info->positions_needed.large.count = s_info->width;
     }
   else
     s_info->positions_needed.small_bitmask = HOST_WIDE_INT_0U;
@@ -1227,8 +1242,7 @@ static inline bool
 any_positions_needed_p (store_info *s_info)
 {
   if (__builtin_expect (s_info->is_large, false))
-    return (s_info->positions_needed.large.count
-	    < s_info->end - s_info->begin);
+    return s_info->positions_needed.large.count < s_info->width;
   else
     return (s_info->positions_needed.small_bitmask != HOST_WIDE_INT_0U);
 }
@@ -1355,8 +1369,12 @@ record_store (rtx body, bb_info_t bb_info)
       set_usage_bits (group, offset, width, expr);
 
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, " processing const base store gid=%d[%d..%d)\n",
-		 group_id, (int)offset, (int)(offset+width));
+	{
+	  fprintf (dump_file, " processing const base store gid=%d",
+		   group_id);
+	  print_range (dump_file, offset, width);
+	  fprintf (dump_file, "\n");
+	}
     }
   else
     {
@@ -1368,8 +1386,11 @@ record_store (rtx body, bb_info_t bb_info)
       group_id = -1;
 
       if (dump_file && (dump_flags & TDF_DETAILS))
-	fprintf (dump_file, " processing cselib store [%d..%d)\n",
-		 (int)offset, (int)(offset+width));
+	{
+	  fprintf (dump_file, " processing cselib store ");
+	  print_range (dump_file, offset, width);
+	  fprintf (dump_file, "\n");
+	}
     }
 
   const_rhs = rhs = NULL_RTX;
@@ -1435,18 +1456,21 @@ record_store (rtx body, bb_info_t bb_info)
 	{
 	  HOST_WIDE_INT i;
 	  if (dump_file && (dump_flags & TDF_DETAILS))
-	    fprintf (dump_file, "    trying store in insn=%d gid=%d[%d..%d)\n",
-		     INSN_UID (ptr->insn), s_info->group_id,
-		     (int)s_info->begin, (int)s_info->end);
+	    {
+	      fprintf (dump_file, "    trying store in insn=%d gid=%d",
+		       INSN_UID (ptr->insn), s_info->group_id);
+	      print_range (dump_file, s_info->offset, s_info->width);
+	      fprintf (dump_file, "\n");
+	    }
 
 	  /* Even if PTR won't be eliminated as unneeded, if both
 	     PTR and this insn store the same constant value, we might
 	     eliminate this insn instead.  */
 	  if (s_info->const_rhs
 	      && const_rhs
-	      && offset >= s_info->begin
-	      && offset + width <= s_info->end
-	      && all_positions_needed_p (s_info, offset - s_info->begin,
+	      && known_subrange_p (offset, width,
+				   s_info->offset, s_info->width)
+	      && all_positions_needed_p (s_info, offset - s_info->offset,
 					 width))
 	    {
 	      if (GET_MODE (mem) == BLKmode)
@@ -1462,8 +1486,7 @@ record_store (rtx body, bb_info_t bb_info)
 		{
 		  rtx val;
 		  start_sequence ();
-		  val = get_stored_val (s_info, GET_MODE (mem),
-					offset, offset + width,
+		  val = get_stored_val (s_info, GET_MODE (mem), offset, width,
 					BLOCK_FOR_INSN (insn_info->insn),
 					true);
 		  if (get_insns () != NULL)
@@ -1474,10 +1497,18 @@ record_store (rtx body, bb_info_t bb_info)
 		}
 	    }
 
-	  for (i = MAX (offset, s_info->begin);
-	       i < offset + width && i < s_info->end;
-	       i++)
-	    set_position_unneeded (s_info, i - s_info->begin);
+	  if (known_subrange_p (s_info->offset, s_info->width, offset, width))
+	    /* The new store touches every byte that S_INFO does.  */
+	    set_all_positions_unneeded (s_info);
+	  else
+	    {
+	      HOST_WIDE_INT begin_unneeded = offset - s_info->offset;
+	      HOST_WIDE_INT end_unneeded = begin_unneeded + width;
+	      begin_unneeded = MAX (begin_unneeded, 0);
+	      end_unneeded = MIN (end_unneeded, s_info->width);
+	      for (i = begin_unneeded; i < end_unneeded; ++i)
+		set_position_unneeded (s_info, i);
+	    }
 	}
       else if (s_info->rhs)
 	/* Need to see if it is possible for this store to overwrite
@@ -1535,8 +1566,8 @@ record_store (rtx body, bb_info_t bb_info)
       store_info->positions_needed.small_bitmask = lowpart_bitmask (width);
     }
   store_info->group_id = group_id;
-  store_info->begin = offset;
-  store_info->end = offset + width;
+  store_info->offset = offset;
+  store_info->width = width;
   store_info->is_set = GET_CODE (body) == SET;
   store_info->rhs = rhs;
   store_info->const_rhs = const_rhs;
@@ -1700,39 +1731,38 @@ look_for_hardregs (rtx x, const_rtx pat ATTRIBUTE_UNUSED, void *data)
 }
 
 /* Helper function for replace_read and record_store.
-   Attempt to return a value stored in STORE_INFO, from READ_BEGIN
-   to one before READ_END bytes read in READ_MODE.  Return NULL
+   Attempt to return a value of mode READ_MODE stored in STORE_INFO,
+   consisting of READ_WIDTH bytes starting from READ_OFFSET.  Return NULL
    if not successful.  If REQUIRE_CST is true, return always constant.  */
 
 static rtx
 get_stored_val (store_info *store_info, machine_mode read_mode,
-		HOST_WIDE_INT read_begin, HOST_WIDE_INT read_end,
+		HOST_WIDE_INT read_offset, HOST_WIDE_INT read_width,
 		basic_block bb, bool require_cst)
 {
   machine_mode store_mode = GET_MODE (store_info->mem);
-  int shift;
-  int access_size; /* In bytes.  */
+  HOST_WIDE_INT gap;
   rtx read_reg;
 
   /* To get here the read is within the boundaries of the write so
      shift will never be negative.  Start out with the shift being in
      bytes.  */
   if (store_mode == BLKmode)
-    shift = 0;
+    gap = 0;
   else if (BYTES_BIG_ENDIAN)
-    shift = store_info->end - read_end;
+    gap = ((store_info->offset + store_info->width)
+	   - (read_offset + read_width));
   else
-    shift = read_begin - store_info->begin;
+    gap = read_offset - store_info->offset;
 
-  access_size = shift + GET_MODE_SIZE (read_mode);
-
-  /* From now on it is bits.  */
-  shift *= BITS_PER_UNIT;
-
-  if (shift)
-    read_reg = find_shift_sequence (access_size, store_info, read_mode, shift,
-    				    optimize_bb_for_speed_p (bb),
-				    require_cst);
+  if (gap != 0)
+    {
+      HOST_WIDE_INT shift = gap * BITS_PER_UNIT;
+      HOST_WIDE_INT access_size = GET_MODE_SIZE (read_mode) + gap;
+      read_reg = find_shift_sequence (access_size, store_info, read_mode,
+				      shift, optimize_bb_for_speed_p (bb),
+				      require_cst);
+    }
   else if (store_mode == BLKmode)
     {
       /* The store is a memset (addr, const_val, const_size).  */
@@ -1835,7 +1865,7 @@ replace_read (store_info *store_info, insn_info_t store_insn,
   start_sequence ();
   bb = BLOCK_FOR_INSN (read_insn->insn);
   read_reg = get_stored_val (store_info,
-			     read_mode, read_info->begin, read_info->end,
+			     read_mode, read_info->offset, read_info->width,
 			     bb, false);
   if (read_reg == NULL_RTX)
     {
@@ -1986,8 +2016,8 @@ check_mem_read_rtx (rtx *loc, bb_info_t bb_info)
   read_info = read_info_type_pool.allocate ();
   read_info->group_id = group_id;
   read_info->mem = mem;
-  read_info->begin = offset;
-  read_info->end = offset + width;
+  read_info->offset = offset;
+  read_info->width = width;
   read_info->next = insn_info->read_rec;
   insn_info->read_rec = read_info;
   if (group_id < 0)
@@ -2013,8 +2043,11 @@ check_mem_read_rtx (rtx *loc, bb_info_t bb_info)
 	    fprintf (dump_file, " processing const load gid=%d[BLK]\n",
 		     group_id);
 	  else
-	    fprintf (dump_file, " processing const load gid=%d[%d..%d)\n",
-		     group_id, (int)offset, (int)(offset+width));
+	    {
+	      fprintf (dump_file, " processing const load gid=%d", group_id);
+	      print_range (dump_file, offset, width);
+	      fprintf (dump_file, "\n");
+	    }
 	}
 
       while (i_ptr)
@@ -2052,19 +2085,19 @@ check_mem_read_rtx (rtx *loc, bb_info_t bb_info)
 	      else
 		{
 		  if (store_info->rhs
-		      && offset >= store_info->begin
-		      && offset + width <= store_info->end
+		      && known_subrange_p (offset, width, store_info->offset,
+					   store_info->width)
 		      && all_positions_needed_p (store_info,
-						 offset - store_info->begin,
+						 offset - store_info->offset,
 						 width)
 		      && replace_read (store_info, i_ptr, read_info,
 				       insn_info, loc, bb_info->regs_live))
 		    return;
 
 		  /* The bases are the same, just see if the offsets
-		     overlap.  */
-		  if ((offset < store_info->end)
-		      && (offset + width > store_info->begin))
+		     could overlap.  */
+		  if (ranges_may_overlap_p (offset, width, store_info->offset,
+					    store_info->width))
 		    remove = true;
 		}
 	    }
@@ -2119,11 +2152,10 @@ check_mem_read_rtx (rtx *loc, bb_info_t bb_info)
 	  if (store_info->rhs
 	      && store_info->group_id == -1
 	      && store_info->cse_base == base
-	      && width != -1
-	      && offset >= store_info->begin
-	      && offset + width <= store_info->end
+	      && known_subrange_p (offset, width, store_info->offset,
+				   store_info->width)
 	      && all_positions_needed_p (store_info,
-					 offset - store_info->begin, width)
+					 offset - store_info->offset, width)
 	      && replace_read (store_info, i_ptr,  read_info, insn_info, loc,
 			       bb_info->regs_live))
 	    return;
@@ -2775,16 +2807,19 @@ scan_stores (store_info *store_info, bitmap gen, bitmap kill)
       group_info *group_info
 	= rtx_group_vec[store_info->group_id];
       if (group_info->process_globally)
-	for (i = store_info->begin; i < store_info->end; i++)
-	  {
-	    int index = get_bitmap_index (group_info, i);
-	    if (index != 0)
-	      {
-		bitmap_set_bit (gen, index);
-		if (kill)
-		  bitmap_clear_bit (kill, index);
-	      }
-	  }
+	{
+	  HOST_WIDE_INT end = store_info->offset + store_info->width;
+	  for (i = store_info->offset; i < end; i++)
+	    {
+	      int index = get_bitmap_index (group_info, i);
+	      if (index != 0)
+		{
+		  bitmap_set_bit (gen, index);
+		  if (kill)
+		    bitmap_clear_bit (kill, index);
+		}
+	    }
+	}
       store_info = store_info->next;
     }
 }
@@ -2834,9 +2869,9 @@ scan_reads (insn_info_t insn_info, bitmap gen, bitmap kill)
 	    {
 	      if (i == read_info->group_id)
 		{
-		  if (read_info->begin > read_info->end)
+		  if (!known_size_p (read_info->width))
 		    {
-		      /* Begin > end for block mode reads.  */
+		      /* Handle block mode reads.  */
 		      if (kill)
 			bitmap_ior_into (kill, group->group_kill);
 		      bitmap_and_compl_into (gen, group->group_kill);
@@ -2846,7 +2881,8 @@ scan_reads (insn_info_t insn_info, bitmap gen, bitmap kill)
 		      /* The groups are the same, just process the
 			 offsets.  */
 		      HOST_WIDE_INT j;
-		      for (j = read_info->begin; j < read_info->end; j++)
+		      HOST_WIDE_INT end = read_info->offset + read_info->width;
+		      for (j = read_info->offset; j < end; j++)
 			{
 			  int index = get_bitmap_index (group, j);
 			  if (index != 0)
@@ -3265,7 +3301,8 @@ dse_step5 (void)
 	      HOST_WIDE_INT i;
 	      group_info *group_info = rtx_group_vec[store_info->group_id];
 
-	      for (i = store_info->begin; i < store_info->end; i++)
+	      HOST_WIDE_INT end = store_info->offset + store_info->width;
+	      for (i = store_info->offset; i < end; i++)
 		{
 		  int index = get_bitmap_index (group_info, i);
 
