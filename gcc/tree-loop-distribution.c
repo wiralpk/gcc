@@ -927,6 +927,9 @@ const_with_all_bytes_same (tree val)
           && CONSTRUCTOR_NELTS (val) == 0))
     return 0;
 
+  if (TREE_CODE (val) == VEC_DUPLICATE_CST)
+    return const_with_all_bytes_same (VEC_DUPLICATE_CST_ELT (val));
+
   if (real_zerop (val))
     {
       /* Only return 0 for +0.0, not for -0.0, which doesn't have

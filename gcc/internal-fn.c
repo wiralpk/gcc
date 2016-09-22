@@ -1997,12 +1997,12 @@ expand_vector_ubsan_overflow (location_t loc, enum tree_code code, tree lhs,
       emit_move_insn (cntvar, const0_rtx);
       emit_label (loop_lab);
     }
-  if (TREE_CODE (arg0) != VECTOR_CST)
+  if (!CONSTANT_CLASS_P (arg0))
     {
       rtx arg0r = expand_normal (arg0);
       arg0 = make_tree (TREE_TYPE (arg0), arg0r);
     }
-  if (TREE_CODE (arg1) != VECTOR_CST)
+  if (!CONSTANT_CLASS_P (arg1))
     {
       rtx arg1r = expand_normal (arg1);
       arg1 = make_tree (TREE_TYPE (arg1), arg1r);

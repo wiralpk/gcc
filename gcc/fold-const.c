@@ -418,6 +418,9 @@ negate_expr_p (tree t)
 	return true;
       }
 
+    case VEC_DUPLICATE_CST:
+      return negate_expr_p (VEC_DUPLICATE_CST_ELT (t));
+
     case COMPLEX_EXPR:
       return negate_expr_p (TREE_OPERAND (t, 0))
 	     && negate_expr_p (TREE_OPERAND (t, 1));
@@ -577,6 +580,14 @@ fold_negate_expr_1 (location_t loc, tree t)
 	  }
 
 	return build_vector (type, elts);
+      }
+
+    case VEC_DUPLICATE_CST:
+      {
+	tree sub = fold_negate_expr (loc, VEC_DUPLICATE_CST_ELT (t));
+	if (!sub)
+	  return NULL_TREE;
+	return build_vector_from_val (type, sub);
       }
 
     case COMPLEX_EXPR:
@@ -1436,6 +1447,16 @@ const_binop (enum tree_code code, tree arg1, tree arg2)
       return build_vector (type, elts);
     }
 
+  if (TREE_CODE (arg1) == VEC_DUPLICATE_CST
+      && TREE_CODE (arg2) == VEC_DUPLICATE_CST)
+    {
+      tree sub = const_binop (code, VEC_DUPLICATE_CST_ELT (arg1),
+			      VEC_DUPLICATE_CST_ELT (arg2));
+      if (!sub)
+	return NULL_TREE;
+      return build_vector_from_val (TREE_TYPE (arg1), sub);
+    }
+
   /* Shifts allow a scalar offset for a vector.  */
   if (TREE_CODE (arg1) == VECTOR_CST
       && TREE_CODE (arg2) == INTEGER_CST)
@@ -1458,6 +1479,15 @@ const_binop (enum tree_code code, tree arg1, tree arg2)
 	}
 
       return build_vector (type, elts);
+    }
+
+  if (TREE_CODE (arg1) == VEC_DUPLICATE_CST
+      && TREE_CODE (arg2) == INTEGER_CST)
+    {
+      tree sub = const_binop (code, VEC_DUPLICATE_CST_ELT (arg1), arg2);
+      if (!sub)
+	return NULL_TREE;
+      return build_vector_from_val (TREE_TYPE (arg1), sub);
     }
   return NULL_TREE;
 }
@@ -1652,6 +1682,13 @@ const_unop (enum tree_code code, tree type, tree arg0)
 	  if (i == count)
 	    return build_vector (type, elements);
 	}
+      else if (TREE_CODE (arg0) == VEC_DUPLICATE_CST)
+	{
+	  tree sub = const_unop (BIT_NOT_EXPR, TREE_TYPE (type),
+				 VEC_DUPLICATE_CST_ELT (arg0));
+	  if (sub)
+	    return build_vector_from_val (type, sub);
+	}
       break;
 
     case TRUTH_NOT_EXPR:
@@ -1736,6 +1773,11 @@ const_unop (enum tree_code code, tree type, tree arg0)
 
 	return res;
       }
+
+    case VEC_DUPLICATE_EXPR:
+      if (CONSTANT_CLASS_P (arg0))
+	return build_vector_from_val (type, arg0);
+      return NULL_TREE;
 
     default:
       break;
@@ -2166,6 +2208,15 @@ fold_convert_const (enum tree_code code, tree type, tree arg1)
 	      v.quick_push (cvt);
 	    }
 	  return build_vector (type, v);
+	}
+      if (TREE_CODE (arg1) == VEC_DUPLICATE_CST
+	  && (TYPE_VECTOR_SUBPARTS (type)
+	      == TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1))))
+	{
+	  tree sub = fold_convert_const (code, TREE_TYPE (type),
+					 VEC_DUPLICATE_CST_ELT (arg1));
+	  if (sub)
+	    return build_vector_from_val (type, sub);
 	}
     }
   return NULL_TREE;
@@ -2952,6 +3003,10 @@ operand_equal_p (const_tree arg0, const_tree arg1, unsigned int flags)
 	    }
 	  return 1;
 	}
+
+      case VEC_DUPLICATE_CST:
+	return operand_equal_p (VEC_DUPLICATE_CST_ELT (arg0),
+				VEC_DUPLICATE_CST_ELT (arg1), flags);
 
       case COMPLEX_CST:
 	return (operand_equal_p (TREE_REALPART (arg0), TREE_REALPART (arg1),
@@ -7475,6 +7530,20 @@ can_native_interpret_type_p (tree type)
 static tree
 fold_view_convert_expr (tree type, tree expr)
 {
+  /* Recurse on duplicated vectors if the target type is also a vector
+     and if the elements line up.  */
+  tree expr_type = TREE_TYPE (expr);
+  if (TREE_CODE (expr) == VEC_DUPLICATE_CST
+      && VECTOR_TYPE_P (type)
+      && TYPE_VECTOR_SUBPARTS (type) == TYPE_VECTOR_SUBPARTS (expr_type)
+      && TYPE_SIZE (TREE_TYPE (type)) == TYPE_SIZE (TREE_TYPE (expr_type)))
+    {
+      tree sub = fold_view_convert_expr (TREE_TYPE (type),
+					 VEC_DUPLICATE_CST_ELT (expr));
+      if (sub)
+	return build_vector_from_val (type, sub);
+    }
+
   /* We support up to 512-bit values (for V8DFmode).  */
   unsigned char buffer[64];
   int len;
@@ -8872,6 +8941,15 @@ exact_inverse (tree type, tree cst)
 	  }
 
 	return build_vector (type, elts);
+      }
+
+    case VEC_DUPLICATE_CST:
+      {
+	tree sub = exact_inverse (TREE_TYPE (type),
+				  VEC_DUPLICATE_CST_ELT (cst));
+	if (!sub)
+	  return NULL_TREE;
+	return build_vector_from_val (type, sub);
       }
 
     default:
@@ -11939,6 +12017,9 @@ fold_checksum_tree (const_tree expr, struct md5_ctx *ctx,
 	  for (i = 0; i < (int) VECTOR_CST_NELTS (expr); ++i)
 	    fold_checksum_tree (VECTOR_CST_ELT (expr, i), ctx, ht);
 	  break;
+	case VEC_DUPLICATE_CST:
+	  fold_checksum_tree (VEC_DUPLICATE_CST_ELT (expr), ctx, ht);
+	  break;
 	default:
 	  break;
 	}
@@ -14412,6 +14493,41 @@ test_vector_folding ()
   ASSERT_FALSE (integer_nonzerop (fold_build2 (NE_EXPR, res_type, one, one)));
 }
 
+/* Verify folding of VEC_DUPLICATE_CSTs and VEC_DUPLICATE_EXPRs.  */
+
+static void
+test_vec_duplicate_folding ()
+{
+  scalar_int_mode int_mode = SCALAR_INT_TYPE_MODE (ssizetype);
+  machine_mode vec_mode = targetm.vectorize.preferred_simd_mode (int_mode);
+  /* This will be 1 if VEC_MODE isn't a vector mode.  */
+  unsigned int nunits = GET_MODE_NUNITS (vec_mode);
+
+  tree type = build_vector_type (ssizetype, nunits);
+  tree dup5 = build_vector_from_val (type, ssize_int (5));
+  tree dup3 = build_vector_from_val (type, ssize_int (3));
+
+  tree neg_dup5 = fold_unary (NEGATE_EXPR, type, dup5);
+  ASSERT_EQ (uniform_vector_p (neg_dup5), ssize_int (-5));
+
+  tree not_dup5 = fold_unary (BIT_NOT_EXPR, type, dup5);
+  ASSERT_EQ (uniform_vector_p (not_dup5), ssize_int (-6));
+
+  tree dup5_plus_dup3 = fold_binary (PLUS_EXPR, type, dup5, dup3);
+  ASSERT_EQ (uniform_vector_p (dup5_plus_dup3), ssize_int (8));
+
+  tree dup5_lsl_2 = fold_binary (LSHIFT_EXPR, type, dup5, ssize_int (2));
+  ASSERT_EQ (uniform_vector_p (dup5_lsl_2), ssize_int (20));
+
+  tree size_vector = build_vector_type (sizetype, nunits);
+  tree size_dup5 = fold_convert (size_vector, dup5);
+  ASSERT_EQ (uniform_vector_p (size_dup5), size_int (5));
+
+  tree dup5_expr = fold_unary (VEC_DUPLICATE_EXPR, type, ssize_int (5));
+  tree dup5_cst = build_vector_from_val (type, ssize_int (5));
+  ASSERT_TRUE (operand_equal_p (dup5_expr, dup5_cst, 0));
+}
+
 /* Run all of the selftests within this file.  */
 
 void
@@ -14419,6 +14535,7 @@ fold_const_c_tests ()
 {
   test_arithmetic_folding ();
   test_vector_folding ();
+  test_vec_duplicate_folding ();
 }
 
 } // namespace selftest

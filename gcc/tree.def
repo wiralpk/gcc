@@ -304,6 +304,11 @@ DEFTREECODE (COMPLEX_CST, "complex_cst", tcc_constant, 0)
 /* Contents are in VECTOR_CST_ELTS field.  */
 DEFTREECODE (VECTOR_CST, "vector_cst", tcc_constant, 0)
 
+/* Represents a vector constant in which every element is equal to
+   VEC_DUPLICATE_CST_ELT.  This is only ever used for variable-length
+   vectors; fixed-length vectors must use VECTOR_CST instead.  */
+DEFTREECODE (VEC_DUPLICATE_CST, "vec_duplicate_cst", tcc_constant, 0)
+
 /* Contents are TREE_STRING_LENGTH and the actual contents of the string.  */
 DEFTREECODE (STRING_CST, "string_cst", tcc_constant, 0)
 
@@ -533,6 +538,9 @@ DEFTREECODE (TARGET_EXPR, "target_expr", tcc_expression, 4)
    In cfg gimple, if you do not have a selection expression, operands
    1 and 2 are NULL.  The operands are then taken from the cfg edges. */
 DEFTREECODE (COND_EXPR, "cond_expr", tcc_expression, 3)
+
+/* Represents a vector in which every element is equal to operand 0.  */
+DEFTREECODE (VEC_DUPLICATE_EXPR, "vec_duplicate_expr", tcc_unary, 1)
 
 /* Vector conditional expression. It is like COND_EXPR, but with
    vector operands.

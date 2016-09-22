@@ -975,7 +975,8 @@ struct GTY(()) tree_base {
     /* VEC length.  This field is only used with TREE_VEC.  */
     int length;
 
-    /* Number of elements.  This field is only used with VECTOR_CST.  */
+    /* Number of elements.  This field is only used with VECTOR_CST
+       and VEC_DUPLICATE_CST.  It is always 1 for VEC_DUPLICATE_CST.  */
     unsigned int nelts;
 
     /* SSA version number.  This field is only used with SSA_NAME.  */
@@ -1065,7 +1066,7 @@ struct GTY(()) tree_base {
    public_flag:
 
        TREE_OVERFLOW in
-           INTEGER_CST, REAL_CST, COMPLEX_CST, VECTOR_CST
+           INTEGER_CST, REAL_CST, COMPLEX_CST, VECTOR_CST, VEC_DUPLICATE_CST
 
        TREE_PUBLIC in
            VAR_DECL, FUNCTION_DECL
@@ -1332,7 +1333,7 @@ struct GTY(()) tree_complex {
 
 struct GTY(()) tree_vector {
   struct tree_typed typed;
-  tree GTY ((length ("VECTOR_CST_NELTS ((tree) &%h)"))) elts[1];
+  tree GTY ((length ("((tree) &%h)->base.u.nelts"))) elts[1];
 };
 
 struct GTY(()) tree_identifier {

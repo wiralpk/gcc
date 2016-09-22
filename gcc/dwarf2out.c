@@ -18912,6 +18912,7 @@ rtl_for_decl_init (tree init, tree type)
 	switch (TREE_CODE (init))
 	  {
 	  case VECTOR_CST:
+	  case VEC_DUPLICATE_CST:
 	    break;
 	  case CONSTRUCTOR:
 	    if (TREE_CONSTANT (init))

@@ -211,7 +211,8 @@ class translate_isl_ast_to_gimple
     return TREE_CODE (op) == INTEGER_CST
       || TREE_CODE (op) == REAL_CST
       || TREE_CODE (op) == COMPLEX_CST
-      || TREE_CODE (op) == VECTOR_CST;
+      || TREE_CODE (op) == VECTOR_CST
+      || TREE_CODE (op) == VEC_DUPLICATE_CST;
   }
 
 private:

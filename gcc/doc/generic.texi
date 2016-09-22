@@ -1036,6 +1036,7 @@ As this example indicates, the operands are zero-indexed.
 @tindex FIXED_CST
 @tindex COMPLEX_CST
 @tindex VECTOR_CST
+@tindex VEC_DUPLICATE_CST
 @tindex STRING_CST
 @findex TREE_STRING_LENGTH
 @findex TREE_STRING_POINTER
@@ -1088,6 +1089,14 @@ These nodes are used to represent vector constants, whose parts are
 constant nodes.  Each individual constant node is either an integer or a
 double constant node.  The first operand is a @code{TREE_LIST} of the
 constant nodes and is accessed through @code{TREE_VECTOR_CST_ELTS}.
+
+@item VEC_DUPLICATE_CST
+These nodes represent a vector constant in which every element has the
+same scalar value.  At present only variable-length vectors use
+@code{VEC_DUPLICATE_CST}; constant-length vectors use @code{VECTOR_CST}
+instead.  The scalar element value is given by
+@code{VEC_DUPLICATE_CST_ELT} and has the same restrictions as the
+element of a @code{VECTOR_CST}.
 
 @item STRING_CST
 These nodes represent string-constants.  The @code{TREE_STRING_LENGTH}
@@ -1692,6 +1701,7 @@ a value from @code{enum annot_expr_kind}.
 
 @node Vectors
 @subsection Vectors
+@tindex VEC_DUPLICATE_EXPR
 @tindex VEC_LSHIFT_EXPR
 @tindex VEC_RSHIFT_EXPR
 @tindex VEC_WIDEN_MULT_HI_EXPR
@@ -1703,9 +1713,14 @@ a value from @code{enum annot_expr_kind}.
 @tindex VEC_PACK_TRUNC_EXPR
 @tindex VEC_PACK_SAT_EXPR
 @tindex VEC_PACK_FIX_TRUNC_EXPR
+@tindex VEC_COND_EXPR
 @tindex SAD_EXPR
 
 @table @code
+@item VEC_DUPLICATE_EXPR
+This node has a single operand and represents a vector in which every
+element is equal to that operand.
+
 @item VEC_LSHIFT_EXPR
 @itemx VEC_RSHIFT_EXPR
 These nodes represent whole vector left and right shifts, respectively.

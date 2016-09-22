@@ -709,8 +709,8 @@ extern void omp_clause_range_check_failed (const_tree, const char *, int,
 #define TYPE_REF_CAN_ALIAS_ALL(NODE) \
   (PTR_OR_REF_CHECK (NODE)->base.static_flag)
 
-/* In an INTEGER_CST, REAL_CST, COMPLEX_CST, or VECTOR_CST, this means
-   there was an overflow in folding.  */
+/* In an INTEGER_CST, REAL_CST, COMPLEX_CST, VECTOR_CST or VEC_DUPLICATE_CST,
+   this means there was an overflow in folding.  */
 
 #define TREE_OVERFLOW(NODE) (CST_CHECK (NODE)->base.public_flag)
 
@@ -1008,6 +1008,10 @@ extern void omp_clause_range_check_failed (const_tree, const char *, int,
 #define VECTOR_CST_NELTS(NODE) (VECTOR_CST_CHECK (NODE)->base.u.nelts)
 #define VECTOR_CST_ELTS(NODE) (VECTOR_CST_CHECK (NODE)->vector.elts)
 #define VECTOR_CST_ELT(NODE,IDX) (VECTOR_CST_CHECK (NODE)->vector.elts[IDX])
+
+/* In a VEC_DUPLICATE_CST node.  */
+#define VEC_DUPLICATE_CST_ELT(NODE) \
+  (VEC_DUPLICATE_CST_CHECK (NODE)->vector.elts[0])
 
 /* Define fields and accessors for some special-purpose tree nodes.  */
 

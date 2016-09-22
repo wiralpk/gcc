@@ -11509,6 +11509,7 @@ gimplify_expr (tree *expr_p, gimple_seq *pre_p, gimple_seq *post_p,
 	case STRING_CST:
 	case COMPLEX_CST:
 	case VECTOR_CST:
+	case VEC_DUPLICATE_CST:
 	  /* Drop the overflow flag on constants, we do not want
 	     that in the GIMPLE IL.  */
 	  if (TREE_OVERFLOW_P (*expr_p))

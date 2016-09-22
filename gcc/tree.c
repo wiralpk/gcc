@@ -464,6 +464,7 @@ tree_node_structure_for_code (enum tree_code code)
     case FIXED_CST:		return TS_FIXED_CST;
     case COMPLEX_CST:		return TS_COMPLEX;
     case VECTOR_CST:		return TS_VECTOR;
+    case VEC_DUPLICATE_CST:	return TS_VECTOR;
     case STRING_CST:		return TS_STRING;
       /* tcc_exceptional cases.  */
     case ERROR_MARK:		return TS_COMMON;
@@ -829,6 +830,7 @@ tree_code_size (enum tree_code code)
 	case FIXED_CST:		return sizeof (tree_fixed_cst);
 	case COMPLEX_CST:	return sizeof (tree_complex);
 	case VECTOR_CST:	return sizeof (tree_vector);
+	case VEC_DUPLICATE_CST:	return sizeof (tree_vector);
 	case STRING_CST:	gcc_unreachable ();
 	default:
 	  gcc_checking_assert (code >= NUM_TREE_CODES);
@@ -889,6 +891,9 @@ tree_size (const_tree node)
     case VECTOR_CST:
       return (sizeof (struct tree_vector)
 	      + (VECTOR_CST_NELTS (node) - 1) * sizeof (tree));
+
+    case VEC_DUPLICATE_CST:
+      return sizeof (struct tree_vector);
 
     case STRING_CST:
       return TREE_STRING_LENGTH (node) + offsetof (struct tree_string, str) + 1;
@@ -1697,6 +1702,34 @@ cst_and_fits_in_hwi (const_tree x)
 	  && (tree_fits_shwi_p (x) || tree_fits_uhwi_p (x)));
 }
 
+/* Build a new VEC_DUPLICATE_CST with type TYPE and operand EXP.
+
+   This function is only suitable for callers that know TYPE is a
+   variable-length vector and specifically need a VEC_DUPLICATE_CST node.
+   Use build_vector_from_val to duplicate a general scalar into a general
+   vector type.  */
+
+static tree
+build_vec_duplicate_cst (tree type, tree exp MEM_STAT_DECL)
+{
+  /* Shouldn't be used until we have variable-length vectors.  */
+  gcc_unreachable ();
+
+  int length = sizeof (struct tree_vector);
+
+  record_node_allocation_statistics (VEC_DUPLICATE_CST, length);
+
+  tree t = ggc_alloc_cleared_tree_node_stat (length PASS_MEM_STAT);
+
+  TREE_SET_CODE (t, VEC_DUPLICATE_CST);
+  TREE_TYPE (t) = type;
+  t->base.u.nelts = 1;
+  VEC_DUPLICATE_CST_ELT (t) = exp;
+  TREE_CONSTANT (t) = 1;
+
+  return t;
+}
+
 /* Build a newly constructed VECTOR_CST node of length LEN.  */
 
 tree
@@ -1789,6 +1822,13 @@ build_vector_from_val (tree vectype, tree sc)
      vector element-type.  */
   gcc_checking_assert (types_compatible_p (TYPE_MAIN_VARIANT (TREE_TYPE (sc)),
 					   TREE_TYPE (vectype)));
+
+  if (0)
+    {
+      if (CONSTANT_CLASS_P (sc))
+	return build_vec_duplicate_cst (vectype, sc);
+      return fold_build1 (VEC_DUPLICATE_EXPR, vectype, sc);
+    }
 
   if (CONSTANT_CLASS_P (sc))
     {
@@ -2358,6 +2398,8 @@ integer_zerop (const_tree expr)
 	    return false;
 	return true;
       }
+    case VEC_DUPLICATE_CST:
+      return integer_zerop (VEC_DUPLICATE_CST_ELT (expr));
     default:
       return false;
     }
@@ -2384,6 +2426,8 @@ integer_onep (const_tree expr)
 	    return false;
 	return true;
       }
+    case VEC_DUPLICATE_CST:
+      return integer_onep (VEC_DUPLICATE_CST_ELT (expr));
     default:
       return false;
     }
@@ -2421,6 +2465,9 @@ integer_all_onesp (const_tree expr)
 	  return 0;
       return 1;
     }
+
+  else if (TREE_CODE (expr) == VEC_DUPLICATE_CST)
+    return integer_all_onesp (VEC_DUPLICATE_CST_ELT (expr));
 
   else if (TREE_CODE (expr) != INTEGER_CST)
     return 0;
@@ -2478,7 +2525,7 @@ integer_nonzerop (const_tree expr)
 int
 integer_truep (const_tree expr)
 {
-  if (TREE_CODE (expr) == VECTOR_CST)
+  if (TREE_CODE (expr) == VECTOR_CST || TREE_CODE (expr) == VEC_DUPLICATE_CST)
     return integer_all_onesp (expr);
   return integer_onep (expr);
 }
@@ -2649,6 +2696,8 @@ real_zerop (const_tree expr)
 	    return false;
 	return true;
       }
+    case VEC_DUPLICATE_CST:
+      return real_zerop (VEC_DUPLICATE_CST_ELT (expr));
     default:
       return false;
     }
@@ -2677,6 +2726,8 @@ real_onep (const_tree expr)
 	    return false;
 	return true;
       }
+    case VEC_DUPLICATE_CST:
+      return real_onep (VEC_DUPLICATE_CST_ELT (expr));
     default:
       return false;
     }
@@ -2704,6 +2755,8 @@ real_minus_onep (const_tree expr)
 	    return false;
 	return true;
       }
+    case VEC_DUPLICATE_CST:
+      return real_minus_onep (VEC_DUPLICATE_CST_ELT (expr));
     default:
       return false;
     }
@@ -7106,6 +7159,9 @@ add_expr (const_tree t, inchash::hash &hstate, unsigned int flags)
 	  inchash::add_expr (VECTOR_CST_ELT (t, i), hstate, flags);
 	return;
       }
+    case VEC_DUPLICATE_CST:
+      inchash::add_expr (VEC_DUPLICATE_CST_ELT (t), hstate);
+      return;
     case SSA_NAME:
       /* We can just compare by pointer.  */
       hstate.add_hwi (SSA_NAME_VERSION (t));
@@ -10367,6 +10423,9 @@ initializer_zerop (const_tree init)
 	return true;
       }
 
+    case VEC_DUPLICATE_CST:
+      return initializer_zerop (VEC_DUPLICATE_CST_ELT (init));
+
     case CONSTRUCTOR:
       {
 	unsigned HOST_WIDE_INT idx;
@@ -10412,7 +10471,13 @@ uniform_vector_p (const_tree vec)
 
   gcc_assert (VECTOR_TYPE_P (TREE_TYPE (vec)));
 
-  if (TREE_CODE (vec) == VECTOR_CST)
+  if (TREE_CODE (vec) == VEC_DUPLICATE_CST)
+    return VEC_DUPLICATE_CST_ELT (vec);
+
+  else if (TREE_CODE (vec) == VEC_DUPLICATE_EXPR)
+    return TREE_OPERAND (vec, 0);
+
+  else if (TREE_CODE (vec) == VECTOR_CST)
     {
       first = VECTOR_CST_ELT (vec, 0);
       for (i = 1; i < VECTOR_CST_NELTS (vec); ++i)
@@ -11144,6 +11209,7 @@ walk_tree_1 (tree *tp, walk_tree_fn func, void *data,
     case REAL_CST:
     case FIXED_CST:
     case VECTOR_CST:
+    case VEC_DUPLICATE_CST:
     case STRING_CST:
     case BLOCK:
     case PLACEHOLDER_EXPR:
@@ -12429,6 +12495,12 @@ drop_tree_overflow (tree t)
 	  if (TREE_OVERFLOW (elt))
 	    elt = drop_tree_overflow (elt);
 	}
+    }
+  if (TREE_CODE (t) == VEC_DUPLICATE_CST)
+    {
+      tree *elt = &VEC_DUPLICATE_CST_ELT (t);
+      if (TREE_OVERFLOW (*elt))
+	*elt = drop_tree_overflow (*elt);
     }
   return t;
 }
@@ -13850,6 +13922,102 @@ test_integer_constants ()
   ASSERT_EQ (type, TREE_TYPE (zero));
 }
 
+/* Verify predicate handling of VEC_DUPLICATE_CSTs and VEC_DUPLICATE_EXPRs
+   for integral type TYPE.  */
+
+static void
+test_vec_duplicate_predicates_int (tree type)
+{
+  scalar_int_mode int_mode = SCALAR_INT_TYPE_MODE (type);
+  machine_mode vec_mode = targetm.vectorize.preferred_simd_mode (int_mode);
+  /* This will be 1 if VEC_MODE isn't a vector mode.  */
+  unsigned int nunits = GET_MODE_NUNITS (vec_mode);
+
+  tree vec_type = build_vector_type (type, nunits);
+
+  tree zero = build_zero_cst (type);
+  tree vec_zero = build_vector_from_val (vec_type, zero);
+  ASSERT_TRUE (integer_zerop (vec_zero));
+  ASSERT_FALSE (integer_onep (vec_zero));
+  ASSERT_FALSE (integer_minus_onep (vec_zero));
+  ASSERT_FALSE (integer_all_onesp (vec_zero));
+  ASSERT_FALSE (integer_truep (vec_zero));
+  ASSERT_TRUE (initializer_zerop (vec_zero));
+
+  tree one = build_one_cst (type);
+  tree vec_one = build_vector_from_val (vec_type, one);
+  ASSERT_FALSE (integer_zerop (vec_one));
+  ASSERT_TRUE (integer_onep (vec_one));
+  ASSERT_FALSE (integer_minus_onep (vec_one));
+  ASSERT_FALSE (integer_all_onesp (vec_one));
+  ASSERT_FALSE (integer_truep (vec_one));
+  ASSERT_FALSE (initializer_zerop (vec_one));
+
+  tree minus_one = build_minus_one_cst (type);
+  tree vec_minus_one = build_vector_from_val (vec_type, minus_one);
+  ASSERT_FALSE (integer_zerop (vec_minus_one));
+  ASSERT_FALSE (integer_onep (vec_minus_one));
+  ASSERT_TRUE (integer_minus_onep (vec_minus_one));
+  ASSERT_TRUE (integer_all_onesp (vec_minus_one));
+  ASSERT_TRUE (integer_truep (vec_minus_one));
+  ASSERT_FALSE (initializer_zerop (vec_minus_one));
+
+  tree x = create_tmp_var_raw (type, "x");
+  tree vec_x = build1 (VEC_DUPLICATE_EXPR, vec_type, x);
+  ASSERT_EQ (uniform_vector_p (vec_zero), zero);
+  ASSERT_EQ (uniform_vector_p (vec_one), one);
+  ASSERT_EQ (uniform_vector_p (vec_minus_one), minus_one);
+  ASSERT_EQ (uniform_vector_p (vec_x), x);
+}
+
+/* Verify predicate handling of VEC_DUPLICATE_CSTs for floating-point
+   type TYPE.  */
+
+static void
+test_vec_duplicate_predicates_float (tree type)
+{
+  scalar_float_mode float_mode = SCALAR_FLOAT_TYPE_MODE (type);
+  machine_mode vec_mode = targetm.vectorize.preferred_simd_mode (float_mode);
+  /* This will be 1 if VEC_MODE isn't a vector mode.  */
+  unsigned int nunits = GET_MODE_NUNITS (vec_mode);
+
+  tree vec_type = build_vector_type (type, nunits);
+
+  tree zero = build_zero_cst (type);
+  tree vec_zero = build_vector_from_val (vec_type, zero);
+  ASSERT_TRUE (real_zerop (vec_zero));
+  ASSERT_FALSE (real_onep (vec_zero));
+  ASSERT_FALSE (real_minus_onep (vec_zero));
+  ASSERT_TRUE (initializer_zerop (vec_zero));
+
+  tree one = build_one_cst (type);
+  tree vec_one = build_vector_from_val (vec_type, one);
+  ASSERT_FALSE (real_zerop (vec_one));
+  ASSERT_TRUE (real_onep (vec_one));
+  ASSERT_FALSE (real_minus_onep (vec_one));
+  ASSERT_FALSE (initializer_zerop (vec_one));
+
+  tree minus_one = build_minus_one_cst (type);
+  tree vec_minus_one = build_vector_from_val (vec_type, minus_one);
+  ASSERT_FALSE (real_zerop (vec_minus_one));
+  ASSERT_FALSE (real_onep (vec_minus_one));
+  ASSERT_TRUE (real_minus_onep (vec_minus_one));
+  ASSERT_FALSE (initializer_zerop (vec_minus_one));
+
+  ASSERT_EQ (uniform_vector_p (vec_zero), zero);
+  ASSERT_EQ (uniform_vector_p (vec_one), one);
+  ASSERT_EQ (uniform_vector_p (vec_minus_one), minus_one);
+}
+
+/* Verify predicate handling of VEC_DUPLICATE_CSTs and VEC_DUPLICATE_EXPRs.  */
+
+static void
+test_vec_duplicate_predicates ()
+{
+  test_vec_duplicate_predicates_int (integer_type_node);
+  test_vec_duplicate_predicates_float (float_type_node);
+}
+
 /* Verify identifiers.  */
 
 static void
@@ -13878,6 +14046,7 @@ void
 tree_c_tests ()
 {
   test_integer_constants ();
+  test_vec_duplicate_predicates ();
   test_identifiers ();
   test_labels ();
 }

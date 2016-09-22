@@ -1013,6 +1013,9 @@ DEFINE_INT_AND_FLOAT_ROUND_FN (RINT)
  VECTOR_CST
  (if (FLOAT_TYPE_P (TREE_TYPE (type)) || TYPE_OVERFLOW_WRAPS (type))))
 (match negate_expr_p
+ VEC_DUPLICATE_CST
+ (if (FLOAT_TYPE_P (TREE_TYPE (type)) || TYPE_OVERFLOW_WRAPS (type))))
+(match negate_expr_p
  (minus @0 @1)
  (if ((ANY_INTEGRAL_TYPE_P (type) && TYPE_OVERFLOW_WRAPS (type))
       || (FLOAT_TYPE_P (type)

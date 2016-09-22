@@ -3068,6 +3068,9 @@ const_hash_1 (const tree exp)
     CASE_CONVERT:
       return const_hash_1 (TREE_OPERAND (exp, 0)) * 7 + 2;
 
+    case VEC_DUPLICATE_CST:
+      return const_hash_1 (VEC_DUPLICATE_CST_ELT (exp)) * 7 + 3;
+
     default:
       /* A language specific constant. Just hash the code.  */
       return code;
@@ -3157,6 +3160,10 @@ compare_constant (const tree t1, const tree t2)
 
 	return 1;
       }
+
+    case VEC_DUPLICATE_CST:
+      return compare_constant (VEC_DUPLICATE_CST_ELT (t1),
+			       VEC_DUPLICATE_CST_ELT (t2));
 
     case CONSTRUCTOR:
       {

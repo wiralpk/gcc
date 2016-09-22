@@ -1802,6 +1802,12 @@ dump_generic_node (pretty_printer *pp, tree node, int spc, dump_flags_t flags,
       }
       break;
 
+    case VEC_DUPLICATE_CST:
+      pp_string (pp, "{ ");
+      dump_generic_node (pp, VEC_DUPLICATE_CST_ELT (node), spc, flags, false);
+      pp_string (pp, ", ... }");
+      break;
+
     case FUNCTION_TYPE:
     case METHOD_TYPE:
       dump_generic_node (pp, TREE_TYPE (node), spc, flags, false);
@@ -3236,6 +3242,15 @@ dump_generic_node (pretty_printer *pp, tree node, int spc, dump_flags_t flags,
       dump_generic_node (pp, TREE_OPERAND (node, 0), spc, flags, false);
       pp_string (pp, ", ");
       dump_generic_node (pp, TREE_OPERAND (node, 1), spc, flags, false);
+      pp_string (pp, " > ");
+      break;
+
+    case VEC_DUPLICATE_EXPR:
+      pp_space (pp);
+      for (str = get_tree_code_name (code); *str; str++)
+	pp_character (pp, TOUPPER (*str));
+      pp_string (pp, " < ");
+      dump_generic_node (pp, TREE_OPERAND (node, 0), spc, flags, false);
       pp_string (pp, " > ");
       break;
 
