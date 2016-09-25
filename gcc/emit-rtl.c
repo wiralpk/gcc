@@ -6507,6 +6507,24 @@ need_atomic_barrier_p (enum memmodel model, bool pre)
     }
 }
 
+/* Return a constant shift amount for shifting a value of mode MODE
+   by VALUE bits.  */
+
+rtx
+gen_int_shift_amount (machine_mode mode, HOST_WIDE_INT value)
+{
+  /* ??? Using the inner mode should be wide enough for all useful
+     cases (e.g. QImode usually has 8 shiftable bits, while a QImode
+     shift amount has a range of [-128, 127]).  But in principle
+     a target could require target-dependent behaviour for a
+     shift whose shift amount is wider than the shifted value.
+     Perhaps this should be automatically derived from the .md
+     files instead, or perhaps have a target hook.  */
+  scalar_int_mode shift_mode
+    = int_mode_for_mode (GET_MODE_INNER (mode)).require ();
+  return gen_int_mode (value, shift_mode);
+}
+
 /* Initialize fields of rtl_data related to stack alignment.  */
 
 void
