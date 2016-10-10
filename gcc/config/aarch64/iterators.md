@@ -409,6 +409,9 @@
     UNSPEC_SDOT		; Used in aarch64-simd.md.
     UNSPEC_UDOT		; Used in aarch64-simd.md.
     UNSPEC_SEL		; Used in aarch64-sve.md.
+    UNSPEC_ANDV		; Used in aarch64-sve.md.
+    UNSPEC_IORV		; Used in aarch64-sve.md.
+    UNSPEC_XORV		; Used in aarch64-sve.md.
     UNSPEC_ANDF		; Used in aarch64-sve.md.
     UNSPEC_IORF		; Used in aarch64-sve.md.
     UNSPEC_XORF		; Used in aarch64-sve.md.
@@ -1318,6 +1321,8 @@
 (define_int_iterator FMAXMINV [UNSPEC_FMAXV UNSPEC_FMINV
 			       UNSPEC_FMAXNMV UNSPEC_FMINNMV])
 
+(define_int_iterator BITWISEV [UNSPEC_ANDV UNSPEC_IORV UNSPEC_XORV])
+
 (define_int_iterator LOGICALF [UNSPEC_ANDF UNSPEC_IORF UNSPEC_XORF])
 
 (define_int_iterator HADDSUB [UNSPEC_SHADD UNSPEC_UHADD
@@ -1437,7 +1442,10 @@
 ;; name for consistency with the integer patterns.
 (define_int_attr optab [(UNSPEC_ANDF "and")
 			(UNSPEC_IORF "ior")
-			(UNSPEC_XORF "xor")])
+			(UNSPEC_XORF "xor")
+			(UNSPEC_ANDV "and")
+			(UNSPEC_IORV "ior")
+			(UNSPEC_XORV "xor")])
 
 (define_int_attr  maxmin_uns [(UNSPEC_UMAXV "umax")
 			      (UNSPEC_UMINV "umin")
@@ -1464,6 +1472,10 @@
 				 (UNSPEC_FMINV "fmin")
 				 (UNSPEC_FMAXNM "fmaxnm")
 				 (UNSPEC_FMINNM "fminnm")])
+
+(define_int_attr bit_reduc_op [(UNSPEC_ANDV "andv")
+			       (UNSPEC_IORV "orv")
+			       (UNSPEC_XORV "eorv")])
 
 ;; The SVE logical instruction that implements an unspec.
 (define_int_attr logicalf_op [(UNSPEC_ANDF "and")
