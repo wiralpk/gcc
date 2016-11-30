@@ -68,6 +68,7 @@
     (P0_REGNUM		68)
     (P7_REGNUM		75)
     (P15_REGNUM		83)
+    (FFRT_REGNUM	84)
   ]
 )
 
@@ -169,6 +170,9 @@
     UNSPEC_FADDA
     UNSPEC_CNTP
     UNSPEC_BRKA
+    UNSPEC_LDFF1
+    UNSPEC_READ_NF
+    UNSPEC_WRITE_NF
 ])
 
 (define_c_enum "unspecv" [

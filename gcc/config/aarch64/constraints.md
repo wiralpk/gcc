@@ -199,6 +199,12 @@
        (match_test "aarch64_legitimate_address_p (DFmode, XEXP (op, 0), 1,
 						  ADDR_QUERY_LDP_STP)")))
 
+(define_memory_constraint "Utf"
+  "@internal
+   An address valid for SVE LDFF1s."
+  (and (match_code "mem")
+       (match_test "aarch64_sve_ldff1_operand_p (op)")))
+
 (define_memory_constraint "Utr"
   "@internal
    An address valid for SVE LDR and STR instructions (as distinct from
