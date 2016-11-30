@@ -1289,6 +1289,22 @@
    cmp<cmp_op>\t%0.<Vetype>, %1/z, %2.<Vetype>, %3.<Vetype>"
 )
 
+(define_insn "*fold_cond_<cmp_op><mode>"
+  [(set (match_operand:<VPRED> 0 "register_operand" "=Upa, Upa")
+	(and:<VPRED>
+	  (unspec:<VPRED>
+	    [(match_operand:<VPRED> 1 "aarch64_simd_imm_minus_one")
+	     (match_operand:SVE_I 2 "register_operand" "w, w")
+	     (match_operand:SVE_I 3 "aarch64_sve_cmp_<imm_con>_operand" "<imm_con>, w")]
+	    SVE_COND_INT_CMP)
+	  (match_operand:<VPRED> 4 "register_operand" "Upl, Upl")))
+   (clobber (reg:CC CC_REGNUM))]
+  "TARGET_SVE"
+  "@
+   cmp<cmp_op>\t%0.<Vetype>, %4/z, %2.<Vetype>, #%3
+   cmp<cmp_op>\t%0.<Vetype>, %4/z, %2.<Vetype>, %3.<Vetype>"
+)
+
 ;; Predicated floating-point comparison (excluding FCMUO, which doesn't
 ;; allow #0.0 as an operand).
 (define_insn "*vec_fcm<cmp_op><mode>"
@@ -1314,6 +1330,35 @@
 	  UNSPEC_COND_UO))]
   "TARGET_SVE"
   "fcmuo\t%0.<Vetype>, %1/z, %2.<Vetype>, %3.<Vetype>"
+)
+
+;; Predicated comparison.
+(define_insn "*cond_<cmp_op><mode>"
+  [(set (match_operand:<VPRED> 0 "register_operand" "=Upa, Upa")
+	(and:<VPRED>
+	  (unspec:<VPRED>
+	    [(match_operand:<VPRED> 1 "aarch64_simd_imm_minus_one")
+	     (match_operand:SVE_F 2 "register_operand" "w, w")
+	     (match_operand:SVE_F 3 "aarch64_simd_reg_or_zero" "w, Dz")]
+	    SVE_COND_FP_CMP)
+	  (match_operand:<VPRED> 4 "register_operand" "Upl, Upl")))]
+  "TARGET_SVE"
+  "@
+   fcm<cmp_op>\t%0.<Vetype>, %4/z, %2.<Vetype>, %3.<Vetype>
+   fcm<cmp_op>\t%0.<Vetype>, %4/z, %2.<Vetype>, #0.0"
+)
+
+(define_insn "*cond_unordered<mode>"
+  [(set (match_operand:<VPRED> 0 "register_operand" "=Upa")
+	(and:<VPRED>
+	  (unspec:<VPRED>
+	    [(match_operand:<VPRED> 1 "aarch64_simd_imm_minus_one")
+	     (match_operand:SVE_F 2 "register_operand" "w")
+	     (match_operand:SVE_F 3 "register_operand" "w")]
+	    UNSPEC_COND_UO)
+	  (match_operand:<VPRED> 4 "register_operand" "Upl")))]
+  "TARGET_SVE"
+  "fcmuo\t%0.<Vetype>, %4/z, %2.<Vetype>, %3.<Vetype>"
 )
 
 ;; vcond_mask operand order: true, false, mask
