@@ -4121,7 +4121,7 @@ optimize_bit_field_compare (location_t loc, enum tree_code code,
       || !known_size_p (plbitsize)
       || !plbitsize.is_constant (&lbitsize)
       || !plbitpos.is_constant (&lbitpos)
-      || lbitsize == GET_MODE_BITSIZE (lmode)
+      || must_eq (lbitsize, GET_MODE_BITSIZE (lmode))
       || offset != 0
       || TREE_CODE (linner) == PLACEHOLDER_EXPR
       || lvolatilep)
@@ -5248,8 +5248,9 @@ merge_ranges (int *pin_p, tree *plow, tree *phigh, int in0_p, tree low0,
 		switch (TREE_CODE (TREE_TYPE (low0)))
 		  {
 		  case ENUMERAL_TYPE:
-		    if (TYPE_PRECISION (TREE_TYPE (low0))
-			!= GET_MODE_BITSIZE (TYPE_MODE (TREE_TYPE (low0))))
+		    if (may_ne (TYPE_PRECISION (TREE_TYPE (low0)),
+				GET_MODE_BITSIZE
+				  (TYPE_MODE (TREE_TYPE (low0)))))
 		      break;
 		    /* FALLTHROUGH */
 		  case INTEGER_TYPE:
@@ -5271,8 +5272,9 @@ merge_ranges (int *pin_p, tree *plow, tree *phigh, int in0_p, tree low0,
 		switch (TREE_CODE (TREE_TYPE (high1)))
 		  {
 		  case ENUMERAL_TYPE:
-		    if (TYPE_PRECISION (TREE_TYPE (high1))
-			!= GET_MODE_BITSIZE (TYPE_MODE (TREE_TYPE (high1))))
+		    if (may_ne (TYPE_PRECISION (TREE_TYPE (high1)),
+				GET_MODE_BITSIZE
+				  (TYPE_MODE (TREE_TYPE (high1)))))
 		      break;
 		    /* FALLTHROUGH */
 		  case INTEGER_TYPE:
