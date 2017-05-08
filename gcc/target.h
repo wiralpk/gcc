@@ -201,6 +201,13 @@ typedef vec<unsigned short> vec_perm_indices;
    automatically freed.  */
 typedef auto_vec<unsigned short, 32> auto_vec_perm_indices;
 
+/* The type to use for lists of vector sizes.  */
+typedef vec<poly_uint64> vector_sizes;
+
+/* Same, but can be used to construct local lists that are
+   automatically freed.  */
+typedef auto_vec<poly_uint64, 8> auto_vector_sizes;
+
 /* The target structure.  This holds all the backend hooks.  */
 #define DEFHOOKPOD(NAME, DOC, TYPE, INIT) TYPE NAME;
 #define DEFHOOK(NAME, DOC, TYPE, PARAMS, INIT) TYPE (* NAME) PARAMS;
