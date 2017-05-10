@@ -1,6 +1,7 @@
 /* Basic test on number of inserted callbacks.  */
 /* { dg-do compile } */
 /* { dg-options "-fsanitize-coverage=trace-cmp -fdump-tree-optimized" } */
+/* { dg-skip-if "" { aarch64*-*-* } { "-O0" } { "" } } */
 
 void
 foo (char *a, short *b, int *c, long long *d, float *e, double *f)
