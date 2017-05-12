@@ -163,6 +163,7 @@
     UNSPEC_LDN
     UNSPEC_STN
     UNSPEC_INSR
+    UNSPEC_CLASTB
 ])
 
 (define_c_enum "unspecv" [

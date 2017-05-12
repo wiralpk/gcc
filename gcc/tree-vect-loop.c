@@ -4026,7 +4026,7 @@ static void
 vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
 			   int ncopies)
 {
-  int prologue_cost = 0, epilogue_cost = 0;
+  int prologue_cost = 0, epilogue_cost = 0, inside_cost;
   enum tree_code code;
   optab optab;
   tree vectype;
@@ -4045,12 +4045,10 @@ vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
     target_cost_data = BB_VINFO_TARGET_COST_DATA (STMT_VINFO_BB_VINFO (stmt_info));
 
   /* Condition reductions generate two reductions in the loop.  */
-  if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) == COND_REDUCTION)
+  vect_reduction_type reduction_type
+    = STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info);
+  if (reduction_type == COND_REDUCTION)
     ncopies *= 2;
-
-  /* Cost of reduction op inside loop.  */
-  unsigned inside_cost = add_stmt_cost (target_cost_data, ncopies, vector_stmt,
-					stmt_info, 0, vect_body);
 
   vectype = STMT_VINFO_VECTYPE (stmt_info);
   mode = TYPE_MODE (vectype);
@@ -4061,14 +4059,30 @@ vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
 
   code = gimple_assign_rhs_code (orig_stmt);
 
-  /* Add in cost for initial definition.
-     For cond reduction we have four vectors: initial index, step, initial
-     result of the data reduction, initial value of the index reduction.  */
-  int prologue_stmts = STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info)
-		       == COND_REDUCTION ? 4 : 1;
-  prologue_cost += add_stmt_cost (target_cost_data, prologue_stmts,
-				  scalar_to_vec, stmt_info, 0,
-				  vect_prologue);
+  if (reduction_type == EXTRACT_LAST_REDUCTION)
+    {
+      /* No extra instructions needed in the prologue.  */
+      prologue_cost = 0;
+
+      /* Count NCOPIES FOLD_EXTRACT_LAST operations.  */
+      inside_cost = add_stmt_cost (target_cost_data, ncopies, vec_to_scalar,
+				   stmt_info, 0, vect_body);
+    }
+  else
+    {
+      /* Add in cost for initial definition.
+	 For cond reduction we have four vectors: initial index, step,
+	 initial result of the data reduction, initial value of the index
+	 reduction.  */
+      int prologue_stmts = reduction_type == COND_REDUCTION ? 4 : 1;
+      prologue_cost += add_stmt_cost (target_cost_data, prologue_stmts,
+				      scalar_to_vec, stmt_info, 0,
+				      vect_prologue);
+
+      /* Cost of reduction op inside loop.  */
+      inside_cost = add_stmt_cost (target_cost_data, ncopies, vector_stmt,
+				   stmt_info, 0, vect_body);
+    }
 
   /* Determine cost of epilogue code.
 
@@ -4079,7 +4093,7 @@ vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
     {
       if (reduc_code != ERROR_MARK)
 	{
-	  if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) == COND_REDUCTION)
+	  if (reduction_type == COND_REDUCTION)
 	    {
 	      /* An EQ stmt and an COND_EXPR stmt.  */
 	      epilogue_cost += add_stmt_cost (target_cost_data, 2,
@@ -4104,7 +4118,7 @@ vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
 					      vect_epilogue);
 	    }
 	}
-      else if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) == COND_REDUCTION)
+      else if (reduction_type == COND_REDUCTION)
 	{
 	  unsigned estimated_nunits = vect_nunits_for_cost (vectype);
 	  /* Extraction of scalar elements.  */
@@ -4118,6 +4132,9 @@ vect_model_reduction_cost (stmt_vec_info stmt_info, enum tree_code reduc_code,
 					  scalar_stmt, stmt_info, 0,
 					  vect_epilogue);
 	}
+      else if (reduction_type == EXTRACT_LAST_REDUCTION)
+	/* No extra instructions need in the epilogue.  */
+	;
       else
 	{
 	  int vec_size_in_bits = tree_to_uhwi (TYPE_SIZE (vectype));
@@ -4285,6 +4302,9 @@ get_initial_def_for_reduction (gimple *stmt, tree init_val,
       return vect_create_destination_var (init_val, vectype);
     }
 
+  vect_reduction_type reduction_type
+    = STMT_VINFO_VEC_REDUCTION_TYPE (stmt_vinfo);
+
   /* In case of a nested reduction do not use an adjustment def as
      that case is not supported by the epilogue generation correctly
      if ncopies is not one.  */
@@ -4358,7 +4378,8 @@ get_initial_def_for_reduction (gimple *stmt, tree init_val,
 	if (adjustment_def)
           {
 	    *adjustment_def = NULL_TREE;
-	    if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_vinfo) != COND_REDUCTION)
+	    if (reduction_type != COND_REDUCTION
+		&& reduction_type != EXTRACT_LAST_REDUCTION)
 	      {
 		init_def = vect_get_vec_def_for_operand (init_val, stmt);
 		break;
@@ -6040,6 +6061,11 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
       if (STMT_VINFO_IN_PATTERN_P (vinfo_for_stmt (reduc_stmt)))
 	reduc_stmt = STMT_VINFO_RELATED_STMT (vinfo_for_stmt (reduc_stmt));
 
+      if (STMT_VINFO_VEC_REDUCTION_TYPE (vinfo_for_stmt (reduc_stmt))
+	  == EXTRACT_LAST_REDUCTION)
+	/* Leave the scalar phi in place.  */
+	return true;
+
       gcc_assert (is_gimple_assign (reduc_stmt));
       for (unsigned k = 1; k < gimple_num_ops (reduc_stmt); ++k)
 	{
@@ -6292,16 +6318,6 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
   /* If we have a condition reduction, see if we can simplify it further.  */
   if (v_reduc_type == COND_REDUCTION)
     {
-      if (cond_reduc_dt == vect_induction_def)
-	{
-	  if (dump_enabled_p ())
-	    dump_printf_loc (MSG_NOTE, vect_location,
-			     "condition expression based on "
-			     "integer induction.\n");
-	  STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info)
-	    = INTEGER_INDUC_COND_REDUCTION;
-	}
-
       /* Loop peeling modifies initial value of reduction PHI, which
 	 makes the reduction stmt to be transformed different to the
 	 original stmt analyzed.  We need to record reduction code for
@@ -6313,6 +6329,24 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
 	  /* Also set the reduction type to CONST_COND_REDUCTION.  */
 	  gcc_assert (cond_reduc_dt == vect_constant_def);
 	  STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) = CONST_COND_REDUCTION;
+	}
+      else if (direct_internal_fn_supported_p (IFN_FOLD_EXTRACT_LAST,
+					       vectype_in, OPTIMIZE_FOR_SPEED))
+	{
+	  if (dump_enabled_p ())
+	    dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+			     "optimizing condition reduction with"
+			     " FOLD_EXTRACT_LAST.\n");
+	  STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) = EXTRACT_LAST_REDUCTION;
+	}
+      else if (cond_reduc_dt == vect_induction_def)
+	{
+	  if (dump_enabled_p ())
+	    dump_printf_loc (MSG_NOTE, vect_location,
+			     "optimizing condition reduction based on "
+			     "integer induction.\n");
+	  STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info)
+	    = INTEGER_INDUC_COND_REDUCTION;
 	}
       else if (cond_reduc_dt == vect_constant_def)
 	{
@@ -6467,12 +6501,12 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
           (and also the same tree-code) when generating the epilog code and
           when generating the code inside the loop.  */
 
-  if (orig_stmt)
+  vect_reduction_type reduction_type
+    = STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info);
+  if (orig_stmt && reduction_type == TREE_CODE_REDUCTION)
     {
       /* This is a reduction pattern: get the vectype from the type of the
          reduction variable, and get the tree-code from orig_stmt.  */
-      gcc_assert (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info)
-		  == TREE_CODE_REDUCTION);
       orig_code = gimple_assign_rhs_code (orig_stmt);
       gcc_assert (vectype_out);
       vec_mode = TYPE_MODE (vectype_out);
@@ -6488,13 +6522,12 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
 
       /* For simple condition reductions, replace with the actual expression
 	 we want to base our reduction around.  */
-      if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) == CONST_COND_REDUCTION)
+      if (reduction_type == CONST_COND_REDUCTION)
 	{
 	  orig_code = STMT_VINFO_VEC_CONST_COND_REDUC_CODE (stmt_info);
 	  gcc_assert (orig_code == MAX_EXPR || orig_code == MIN_EXPR);
 	}
-      else if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info)
-		 == INTEGER_INDUC_COND_REDUCTION)
+      else if (reduction_type == INTEGER_INDUC_COND_REDUCTION)
 	orig_code = MAX_EXPR;
     }
 
@@ -6516,7 +6549,9 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
 
   epilog_reduc_code = ERROR_MARK;
 
-  if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) != COND_REDUCTION)
+  if (reduction_type == TREE_CODE_REDUCTION
+      || reduction_type == INTEGER_INDUC_COND_REDUCTION
+      || reduction_type == CONST_COND_REDUCTION)
     {
       if (reduction_code_for_scalar_code (orig_code, &epilog_reduc_code))
 	{
@@ -6551,7 +6586,7 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
 	    }
 	}
     }
-  else
+  else if (reduction_type == COND_REDUCTION)
     {
       int scalar_precision
 	= GET_MODE_PRECISION (SCALAR_TYPE_MODE (scalar_type));
@@ -6566,7 +6601,9 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
 	epilog_reduc_code = REDUC_MAX_EXPR;
     }
 
-  if (epilog_reduc_code == ERROR_MARK && !nunits_out.is_constant ())
+  if (reduction_type != EXTRACT_LAST_REDUCTION
+      && epilog_reduc_code == ERROR_MARK
+      && !nunits_out.is_constant ())
     {
       if (dump_enabled_p ())
 	dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
@@ -6575,8 +6612,7 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
       return false;
     }
 
-  if ((double_reduc
-       || STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) != TREE_CODE_REDUCTION)
+  if ((double_reduc || reduction_type != TREE_CODE_REDUCTION)
       && ncopies > 1)
     {
       if (dump_enabled_p ())
@@ -6666,7 +6702,7 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
         }
     }
 
-  if (STMT_VINFO_VEC_REDUCTION_TYPE (stmt_info) == COND_REDUCTION)
+  if (reduction_type == COND_REDUCTION)
     {
       widest_int ni;
 
@@ -6802,6 +6838,13 @@ vectorizable_reduction (gimple *stmt, gimple_stmt_iterator *gsi,
     gcc_assert (ncopies == 1);
 
   bool masked_loop_p = LOOP_VINFO_FULLY_MASKED_P (loop_vinfo);
+
+  if (reduction_type == EXTRACT_LAST_REDUCTION)
+    {
+      gcc_assert (!slp_node);
+      return vectorizable_condition (stmt, gsi, vec_stmt,
+				     NULL, reduc_index, NULL);
+    }
 
   /* Create the destination vector  */
   vec_dest = vect_create_destination_var (scalar_dest, vectype_out);
