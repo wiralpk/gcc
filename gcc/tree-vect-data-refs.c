@@ -834,15 +834,64 @@ vect_record_base_alignments (vec_info *vinfo)
       }
 }
 
+/* Function can_get_vect_data_ref_required_alignment
+
+   Try to calculate the alignment for the given data reference DR once
+   vectorised.  If successful store the alignment to ALIGNMENT_P.
+
+   For non speculative loops, the alignment is always calculable and is given
+   by preferred_vector_alignment.  For speculative loops we align to the
+   vector size multiplied by the step.  */
+
+bool
+vect_can_calculate_target_alignment (struct data_reference *dr,
+				     unsigned int *alignment_p)
+{
+  gimple *stmt = DR_STMT (dr);
+  stmt_vec_info stmt_info = vinfo_for_stmt (stmt);
+  loop_vec_info loop_vinfo = STMT_VINFO_LOOP_VINFO (stmt_info);
+
+  if (!loop_vinfo || !LOOP_VINFO_SPECULATIVE_EXECUTION (loop_vinfo))
+    {
+      tree vectype = STMT_VINFO_VECTYPE (stmt_info);
+      if (alignment_p)
+	*alignment_p = targetm.vectorize.preferred_vector_alignment (vectype);
+      return true;
+    }
+
+  /* We have to assume that non-constant vector sizes might not be
+     a power of two.  */
+  unsigned HOST_WIDE_INT size;
+  if (!current_vector_size.is_constant (&size))
+    return false;
+
+  /* Step must be a positive integer.  */
+  if (!tree_fits_shwi_p (DR_STEP (dr))
+      || tree_int_cst_sgn (DR_STEP (dr)) <= 0)
+    return false;
+
+  unsigned int step = tree_to_uhwi (DR_STEP (dr));
+  unsigned int unit_size =
+    tree_to_uhwi (TYPE_SIZE_UNIT (TREE_TYPE (DR_REF (dr))));
+
+  /* Step must be a power of two and divisible by the unit size.  */
+  if (!pow2p_hwi (step) || step % unit_size != 0)
+    return false;
+
+  if (alignment_p)
+    *alignment_p = size * BITS_PER_UNIT * step / unit_size;
+  return true;
+}
+
 /* Return the target alignment for the vectorized form of DR.  */
 
 static unsigned int
 vect_calculate_target_alignment (struct data_reference *dr)
 {
-  gimple *stmt = DR_STMT (dr);
-  stmt_vec_info stmt_info = vinfo_for_stmt (stmt);
-  tree vectype = STMT_VINFO_VECTYPE (stmt_info);
-  return targetm.vectorize.preferred_vector_alignment (vectype);
+  unsigned int ret;
+  if (!vect_can_calculate_target_alignment (dr, &ret))
+    gcc_unreachable ();
+  return ret;
 }
 
 /* Function vect_compute_data_ref_alignment
@@ -2288,11 +2337,11 @@ vect_find_same_alignment_drs (struct data_dependence_relation *ddr)
   if (diff != 0)
     {
       /* Get the wider of the two alignments.  */
-      unsigned int align_a = (vect_calculate_target_alignment (dra)
-			      / BITS_PER_UNIT);
-      unsigned int align_b = (vect_calculate_target_alignment (drb)
-			      / BITS_PER_UNIT);
-      unsigned int max_align = MAX (align_a, align_b);
+      unsigned int align_a, align_b;
+      if (!vect_can_calculate_target_alignment (dra, &align_a)
+	  || !vect_can_calculate_target_alignment (drb, &align_b))
+	return;
+      unsigned int max_align = MAX (align_a, align_b) / BITS_PER_UNIT;
 
       /* Require the gap to be a multiple of the larger vector alignment.  */
       if (!wi::multiple_of_p (diff, max_align, SIGNED))
@@ -2341,6 +2390,17 @@ vect_analyze_data_refs_alignment (loop_vec_info vinfo)
   FOR_EACH_VEC_ELT (datarefs, i, dr)
     {
       stmt_vec_info stmt_info = vinfo_for_stmt (DR_STMT (dr));
+
+      if (STMT_VINFO_VECTORIZABLE (stmt_info)
+	  && !vect_can_calculate_target_alignment (dr, NULL))
+	{
+	  if (dump_enabled_p ())
+	    dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+			     "not vectorized: can't calculate required "
+			     "alignment for data ref.\n");
+	  return false;
+	}
+
       if (STMT_VINFO_VECTORIZABLE (stmt_info)
 	  && !vect_compute_data_ref_alignment (dr))
 	{
@@ -3484,7 +3544,17 @@ vect_prune_runtime_alias_test_list (loop_vec_info loop_vinfo)
       else
 	{
 	  if (!operand_equal_p (DR_STEP (dr_a), DR_STEP (dr_b), 0))
-	    length_factor = scalar_loop_iters;
+	    {
+	      if (LOOP_VINFO_SPECULATIVE_EXECUTION (loop_vinfo))
+		{
+		  if (dump_enabled_p ())
+		    dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
+				     "Cannot vectorize speculative loops with "
+				     "differing data reference step sizes.\n");
+		  return false;
+		}
+	      length_factor = scalar_loop_iters;
+	    }
 	  else
 	    length_factor = size_int (vect_factor);
 	  segment_length_a = vect_vfa_segment_size (dr_a, length_factor);
@@ -4465,6 +4535,9 @@ vect_get_new_ssa_name (tree type, enum vect_var_kind var_kind, const char *name)
   {
   case vect_simple_var:
     prefix = "vect";
+    break;
+  case vect_mask_var:
+    prefix = "mask";
     break;
   case vect_scalar_var:
     prefix = "stmp";
@@ -6652,6 +6725,10 @@ vect_supportable_dr_alignment (struct data_reference *dr,
     {
       vect_loop = LOOP_VINFO_LOOP (loop_vinfo);
       nested_in_vect_loop = nested_in_vect_loop_p (vect_loop, stmt);
+
+      /* Speculative loops rely on aligned data refs.  */
+      if (LOOP_VINFO_SPECULATIVE_EXECUTION (loop_vinfo))
+	return dr_unaligned_unsupported;
     }
 
   /* Possibly unaligned access.  */

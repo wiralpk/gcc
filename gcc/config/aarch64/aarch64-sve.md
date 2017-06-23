@@ -2379,6 +2379,16 @@
   "<sve_fp_op>\t%0.<Vetype>, %1/m, %0.<Vetype>, %2.<Vetype>"
 )
 
+(define_insn "break_after_<mode>"
+  [(set (match_operand:PRED_ALL 0 "register_operand" "=Upa")
+	(unspec:PRED_ALL
+	  [(match_operand:PRED_ALL 1 "register_operand" "Upa")
+	   (match_operand:PRED_ALL 2 "register_operand" "Upa")]
+	  UNSPEC_BRKA))]
+  "TARGET_SVE"
+  "brka\t%0.b, %1/z, %2.b"
+)
+
 (define_expand "mask_popcount<mode>"
   [(set (match_operand:DI 0 "register_operand")
 	(unspec:DI [(match_dup 2)
