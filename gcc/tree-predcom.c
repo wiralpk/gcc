@@ -234,7 +234,7 @@ along with GCC; see the file COPYING3.  If not see
 /* The maximum number of iterations between the considered memory
    references.  */
 
-#define MAX_DISTANCE (target_avail_regs < 16 ? 4 : 8)
+#define MAX_DISTANCE (target_avail_regs < 16 ? 3 : 7)
 
 /* Data references (or phi nodes that carry data reference values across
    loop iterations).  */
@@ -378,6 +378,71 @@ static bitmap looparound_phis;
 /* Cache used by tree_to_aff_combination_expand.  */
 
 static hash_map<tree, name_expansion *> *name_expansions;
+
+/* True if we're running the early predcom pass and should only handle
+   cases that aid vectorization.  Specifically this means that:
+
+   - only CT_INVARIANT and CT_STORE_LOAD chains are used
+   - the maximum distance for a CT_STORE_LOAD chain is 1 iteration,
+     and at that distance the store must come after the load
+   - there's no unrolling or detection of looparound phis.
+
+   The idea is handle inductions that go via memory, such as:
+
+     for (int i = 1; i < n; ++i)
+       x[i] = x[i - 1] + 1;
+
+   As it stands this loop could never be vectorized, because a loop body
+   that contains a read of x[j] followed by a write to x[j + 1] would
+   have its vectorization factor limited to 1.  Transforming it to:
+
+     int tmp = x[0];
+     for (int i = 0; i < n; ++i)
+       {
+         tmp += 1;
+         x[i] = tmp:
+       }
+
+   exposes the fact that the stored value is a simple vectorizable
+   induction with start value x[0] and step 1.
+
+   [ Commoning is not always useful even in this situation.  For example,
+     carrying over the value of x[i] won't help us to vectorize:
+
+       for (int i = 1; i < n; ++i)
+	 {
+	   y[i] = x[i - 1];
+	   x[i] += i;
+	 }
+
+     There's no real need to restrict things further though, because we're
+     unable to vectorize these load/store combinations in their current
+     form whatever happens. ]
+
+   We require the store to come after the load when the distance is 1
+   to avoid cases like:
+
+     for (int i = 1; i < n; ++i)
+       {
+	 x[i] = ...;
+	 ... = x[i - 1];
+       }
+
+   These accesses effectively have a distance somewhere between 1 and 2,
+   since after commoning the value stored in the previous iteration would
+   still be live at the next store.  This means that the combination
+   isn't useful for exposing simple inductions.
+
+   Also, unlike the motivating case above, this combination does not
+   prevent vectorization.  If a write to x[j + 1] comes before a read
+   of x[j], the vectorized write completes for all vector elements
+   before the read starts for any vector elements.  */
+
+static bool only_simple_p;
+
+/* The maximum loop carry distance for this execution of the pass.  */
+
+static int max_distance;
 
 /* Dumps data reference REF to FILE.  */
 
@@ -1067,7 +1132,13 @@ add_ref_to_chain (chain_p chain, dref ref)
 
   gcc_assert (wi::les_p (root->offset, ref->offset));
   widest_int dist = ref->offset - root->offset;
-  if (wi::leu_p (MAX_DISTANCE, dist))
+  /* When running before vectorization, only allow the maximum distance
+     if the consumer comes before the producer.  See the comment above
+     ONLY_SIMPLE_P for details.  */
+  if (wi::ltu_p (max_distance, dist)
+      || (only_simple_p
+	  && wi::eq_p (max_distance, dist)
+	  && root->pos < ref->pos))
     {
       free (ref);
       return;
@@ -1307,7 +1378,9 @@ add_looparound_copies (struct loop *loop, chain_p chain)
   dref ref, root = get_chain_root (chain);
   gphi *phi;
 
-  if (chain->type == CT_STORE_STORE)
+  /* There's no point doing this when running before vectorization,
+     since we won't unroll the loop or combine chains.  */
+  if (only_simple_p || chain->type == CT_STORE_STORE)
     return;
 
   FOR_EACH_VEC_ELT (chain->refs, i, ref)
@@ -1360,7 +1433,7 @@ determine_roots_comp (struct loop *loop,
     {
       if (!chain
 	  || (!comp->eliminate_store_p && DR_IS_WRITE (a->ref))
-	  || wi::leu_p (MAX_DISTANCE, a->offset - last_ofs))
+	  || wi::ltu_p (max_distance, a->offset - last_ofs))
 	{
 	  if (nontrivial_chain_p (chain))
 	    {
@@ -1369,6 +1442,15 @@ determine_roots_comp (struct loop *loop,
 	    }
 	  else
 	    release_chain (chain);
+
+	  /* Only create CT_STORE_LOAD and CT_INVARIANT chains when
+	     running before vectorization.  */
+	  if (only_simple_p && !DR_IS_WRITE (a->ref))
+	    {
+	      free (a);
+	      chain = NULL;
+	      continue;
+	    }
 
 	  if (DR_IS_READ (a->ref))
 	    type = CT_LOAD;
@@ -2133,6 +2215,10 @@ determine_unroll_factor (vec<chain_p> chains)
   chain_p chain;
   unsigned factor = 1, af, nfactor, i;
   unsigned max = PARAM_VALUE (PARAM_MAX_UNROLL_TIMES);
+
+  /* Do not unroll when running before vectorization.  */
+  if (only_simple_p)
+    return 1;
 
   FOR_EACH_VEC_ELT (chains, i, chain)
     {
@@ -3174,8 +3260,11 @@ tree_predictive_commoning_loop (struct loop *loop)
   prepare_initializers (loop, chains);
   loop_closed_ssa = prepare_finalizers (loop, chains);
 
-  /* Try to combine the chains that are always worked with together.  */
-  try_combine_chains (loop, &chains);
+  /* During the main pass, try to combine the chains that are always
+     worked with together.  For the early pass it should be better
+     to leave this to the vectorizer.  */
+  if (!only_simple_p)
+    try_combine_chains (loop, &chains);
 
   insert_init_seqs (loop, chains);
 
@@ -3237,13 +3326,17 @@ end: ;
   return (unroll ? 1 : 0) | (loop_closed_ssa ? 2 : 0);
 }
 
-/* Runs predictive commoning.  */
+/* Runs predictive commoning.  EARLY_P is true if we are running before
+   vectorization.  */
 
 unsigned
-tree_predictive_commoning (void)
+tree_predictive_commoning (bool early_p)
 {
   struct loop *loop;
   unsigned ret = 0, changed = 0;
+
+  only_simple_p = early_p;
+  max_distance = early_p ? 1 : MAX_DISTANCE;
 
   initialize_original_copy_tables ();
   FOR_EACH_LOOP (loop, LI_ONLY_INNERMOST)
@@ -3266,18 +3359,50 @@ tree_predictive_commoning (void)
   return ret;
 }
 
-/* Predictive commoning Pass.  */
+/* Predictive commoning pass.  EARLY_P is true if we are running before
+   vectorization.  */
 
 static unsigned
-run_tree_predictive_commoning (struct function *fun)
+run_tree_predictive_commoning (struct function *fun, bool early_p)
 {
   if (number_of_loops (fun) <= 1)
     return 0;
 
-  return tree_predictive_commoning ();
+  return tree_predictive_commoning (early_p);
 }
 
 namespace {
+
+const pass_data pass_data_early_predcom =
+{
+  GIMPLE_PASS, /* type */
+  "epcom", /* name */
+  OPTGROUP_LOOP, /* optinfo_flags */
+  TV_PREDCOM, /* tv_id */
+  PROP_cfg, /* properties_required */
+  0, /* properties_provided */
+  0, /* properties_destroyed */
+  0, /* todo_flags_start */
+  TODO_update_ssa_only_virtuals, /* todo_flags_finish */
+};
+
+class pass_early_predcom : public gimple_opt_pass
+{
+public:
+  pass_early_predcom (gcc::context *ctxt)
+    : gimple_opt_pass (pass_data_early_predcom, ctxt)
+  {}
+
+  /* opt_pass methods: */
+  virtual bool gate (function *)
+  {
+    return flag_predictive_commoning && flag_tree_loop_vectorize;
+  }
+  virtual unsigned int execute (function *fun)
+  {
+    return run_tree_predictive_commoning (fun, true);
+  }
+}; // class pass_early_predcom
 
 const pass_data pass_data_predcom =
 {
@@ -3303,7 +3428,7 @@ public:
   virtual bool gate (function *) { return flag_predictive_commoning != 0; }
   virtual unsigned int execute (function *fun)
     {
-      return run_tree_predictive_commoning (fun);
+      return run_tree_predictive_commoning (fun, false);
     }
 
 }; // class pass_predcom
@@ -3311,9 +3436,13 @@ public:
 } // anon namespace
 
 gimple_opt_pass *
+make_pass_early_predcom (gcc::context *ctxt)
+{
+  return new pass_early_predcom (ctxt);
+}
+
+gimple_opt_pass *
 make_pass_predcom (gcc::context *ctxt)
 {
   return new pass_predcom (ctxt);
 }
-
-
