@@ -1928,7 +1928,7 @@ vn_reference_lookup_3 (ao_ref *ref, tree vuse, void *vr_,
     {
       tree ref2 = TREE_OPERAND (gimple_call_arg (def_stmt, 0), 0);
       tree base2;
-      HOST_WIDE_INT offset2, size2, maxsize2;
+      poly_int64 offset2, size2, maxsize2;
       bool reverse;
       base2 = get_ref_base_and_extent (ref2, &offset2, &size2, &maxsize2,
 				       &reverse);
@@ -1951,7 +1951,7 @@ vn_reference_lookup_3 (ao_ref *ref, tree vuse, void *vr_,
 	   && CONSTRUCTOR_NELTS (gimple_assign_rhs1 (def_stmt)) == 0)
     {
       tree base2;
-      HOST_WIDE_INT offset2, size2, maxsize2;
+      poly_int64 offset2, size2, maxsize2;
       bool reverse;
       base2 = get_ref_base_and_extent (gimple_assign_lhs (def_stmt),
 				       &offset2, &size2, &maxsize2, &reverse);
@@ -1983,13 +1983,12 @@ vn_reference_lookup_3 (ao_ref *ref, tree vuse, void *vr_,
 		   && is_gimple_min_invariant (SSA_VAL (gimple_assign_rhs1 (def_stmt))))))
     {
       tree base2;
-      HOST_WIDE_INT offset2, size2, maxsize2;
+      HOST_WIDE_INT offset2, size2;
       bool reverse;
-      base2 = get_ref_base_and_extent (gimple_assign_lhs (def_stmt),
-				       &offset2, &size2, &maxsize2, &reverse);
-      if (!reverse
-	  && maxsize2 != -1
-	  && maxsize2 == size2
+      base2 = get_ref_base_and_extent_hwi (gimple_assign_lhs (def_stmt),
+					   &offset2, &size2, &reverse);
+      if (base2
+	  && !reverse
 	  && size2 % BITS_PER_UNIT == 0
 	  && offset2 % BITS_PER_UNIT == 0
 	  && operand_equal_p (base, base2, 0)
@@ -2047,14 +2046,14 @@ vn_reference_lookup_3 (ao_ref *ref, tree vuse, void *vr_,
 	   && TREE_CODE (gimple_assign_rhs1 (def_stmt)) == SSA_NAME)
     {
       tree base2;
-      HOST_WIDE_INT offset2, size2, maxsize2;
+      poly_int64 offset2, size2, maxsize2;
       bool reverse;
       base2 = get_ref_base_and_extent (gimple_assign_lhs (def_stmt),
 				       &offset2, &size2, &maxsize2,
 				       &reverse);
       if (!reverse
-	  && maxsize2 != -1
-	  && maxsize2 == size2
+	  && known_size_p (maxsize2)
+	  && must_eq (maxsize2, size2)
 	  && operand_equal_p (base, base2, 0)
 	  && known_subrange_p (offset, maxsize, offset2, size2)
 	  /* ???  We can't handle bitfield precision extracts without
