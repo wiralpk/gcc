@@ -7015,8 +7015,8 @@ store_field (rtx target, poly_int64 bitsize, poly_int64 bitpos,
    this case, but the address of the object can be found.  */
 
 tree
-get_inner_reference (tree exp, HOST_WIDE_INT *pbitsize,
-		     HOST_WIDE_INT *pbitpos, tree *poffset,
+get_inner_reference (tree exp, poly_int64_pod *pbitsize,
+		     poly_int64_pod *pbitpos, tree *poffset,
 		     machine_mode *pmode, int *punsignedp,
 		     int *preversep, int *pvolatilep)
 {
@@ -7024,7 +7024,7 @@ get_inner_reference (tree exp, HOST_WIDE_INT *pbitsize,
   machine_mode mode = VOIDmode;
   bool blkmode_bitfield = false;
   tree offset = size_zero_node;
-  offset_int bit_offset = 0;
+  poly_offset_int bit_offset = 0;
 
   /* First get the mode, signedness, storage order and size.  We do this from
      just the outermost expression.  */
@@ -7089,7 +7089,7 @@ get_inner_reference (tree exp, HOST_WIDE_INT *pbitsize,
       switch (TREE_CODE (exp))
 	{
 	case BIT_FIELD_REF:
-	  bit_offset += wi::to_offset (TREE_OPERAND (exp, 2));
+	  bit_offset += wi::to_poly_offset (TREE_OPERAND (exp, 2));
 	  break;
 
 	case COMPONENT_REF:
@@ -7104,7 +7104,7 @@ get_inner_reference (tree exp, HOST_WIDE_INT *pbitsize,
 	      break;
 
 	    offset = size_binop (PLUS_EXPR, offset, this_offset);
-	    bit_offset += wi::to_offset (DECL_FIELD_BIT_OFFSET (field));
+	    bit_offset += wi::to_poly_offset (DECL_FIELD_BIT_OFFSET (field));
 
 	    /* ??? Right now we don't do anything with DECL_OFFSET_ALIGN.  */
 	  }
@@ -7172,44 +7172,36 @@ get_inner_reference (tree exp, HOST_WIDE_INT *pbitsize,
   /* If OFFSET is constant, see if we can return the whole thing as a
      constant bit position.  Make sure to handle overflow during
      this conversion.  */
-  if (TREE_CODE (offset) == INTEGER_CST)
+  if (poly_int_tree_p (offset))
     {
-      offset_int tem = wi::sext (wi::to_offset (offset),
-				 TYPE_PRECISION (sizetype));
+      poly_offset_int tem = wi::sext (wi::to_poly_offset (offset),
+				      TYPE_PRECISION (sizetype));
       tem <<= LOG2_BITS_PER_UNIT;
       tem += bit_offset;
-      if (wi::fits_shwi_p (tem))
-	{
-	  *pbitpos = tem.to_shwi ();
-	  *poffset = offset = NULL_TREE;
-	}
+      if (tem.to_shwi (pbitpos))
+	*poffset = offset = NULL_TREE;
     }
 
   /* Otherwise, split it up.  */
   if (offset)
     {
       /* Avoid returning a negative bitpos as this may wreak havoc later.  */
-      if (wi::neg_p (bit_offset) || !wi::fits_shwi_p (bit_offset))
+      if (!bit_offset.to_shwi (pbitpos) || may_lt (*pbitpos, 0))
         {
-	  offset_int mask = wi::mask <offset_int> (LOG2_BITS_PER_UNIT, false);
-	  offset_int tem = wi::bit_and_not (bit_offset, mask);
-	  /* TEM is the bitpos rounded to BITS_PER_UNIT towards -Inf.
-	     Subtract it to BIT_OFFSET and add it (scaled) to OFFSET.  */
-	  bit_offset -= tem;
-	  tem >>= LOG2_BITS_PER_UNIT;
+	  *pbitpos = num_trailing_bits (bit_offset.force_shwi ());
+	  poly_offset_int bytes = bits_to_bytes_round_down (bit_offset);
 	  offset = size_binop (PLUS_EXPR, offset,
-			       wide_int_to_tree (sizetype, tem));
+			       build_int_cst (sizetype, bytes.force_shwi ()));
 	}
 
-      *pbitpos = bit_offset.to_shwi ();
       *poffset = offset;
     }
 
   /* We can use BLKmode for a byte-aligned BLKmode bitfield.  */
   if (mode == VOIDmode
       && blkmode_bitfield
-      && (*pbitpos % BITS_PER_UNIT) == 0
-      && (*pbitsize % BITS_PER_UNIT) == 0)
+      && multiple_p (*pbitpos, BITS_PER_UNIT)
+      && multiple_p (*pbitsize, BITS_PER_UNIT))
     *pmode = BLKmode;
   else
     *pmode = mode;
@@ -7760,7 +7752,7 @@ expand_expr_addr_expr_1 (tree exp, rtx target, scalar_int_mode tmode,
 {
   rtx result, subtarget;
   tree inner, offset;
-  HOST_WIDE_INT bitsize, bitpos;
+  poly_int64 bitsize, bitpos;
   int unsignedp, reversep, volatilep = 0;
   machine_mode mode1;
 
@@ -7876,7 +7868,7 @@ expand_expr_addr_expr_1 (tree exp, rtx target, scalar_int_mode tmode,
   /* We must have made progress.  */
   gcc_assert (inner != exp);
 
-  subtarget = offset || bitpos ? NULL_RTX : target;
+  subtarget = offset || may_ne (bitpos, 0) ? NULL_RTX : target;
   /* For VIEW_CONVERT_EXPR, where the outer alignment is bigger than
      inner alignment, force the inner to be sufficiently aligned.  */
   if (CONSTANT_CLASS_P (inner)
@@ -7911,20 +7903,19 @@ expand_expr_addr_expr_1 (tree exp, rtx target, scalar_int_mode tmode,
 	result = simplify_gen_binary (PLUS, tmode, result, tmp);
       else
 	{
-	  subtarget = bitpos ? NULL_RTX : target;
+	  subtarget = may_ne (bitpos, 0) ? NULL_RTX : target;
 	  result = expand_simple_binop (tmode, PLUS, result, tmp, subtarget,
 					1, OPTAB_LIB_WIDEN);
 	}
     }
 
-  if (bitpos)
+  if (may_ne (bitpos, 0))
     {
       /* Someone beforehand should have rejected taking the address
-	 of such an object.  */
-      gcc_assert ((bitpos % BITS_PER_UNIT) == 0);
-
+	 of an object that isn't byte-aligned.  */
+      poly_int64 bytepos = exact_div (bitpos, BITS_PER_UNIT);
       result = convert_memory_address_addr_space (tmode, result, as);
-      result = plus_constant (tmode, result, bitpos / BITS_PER_UNIT);
+      result = plus_constant (tmode, result, bytepos);
       if (modifier < EXPAND_SUM)
 	result = force_operand (result, target);
     }
@@ -10510,7 +10501,7 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
     normal_inner_ref:
       {
 	machine_mode mode1, mode2;
-	HOST_WIDE_INT bitsize, bitpos;
+	poly_int64 bitsize, bitpos, bytepos;
 	tree offset;
 	int reversep, volatilep = 0, must_force_mem;
 	tree tem
@@ -10563,13 +10554,14 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	   to a larger size.  */
 	must_force_mem = (offset
 			  || mode1 == BLKmode
-			  || bitpos + bitsize > GET_MODE_BITSIZE (mode2));
+			  || may_gt (bitpos + bitsize,
+				     GET_MODE_BITSIZE (mode2)));
 
 	/* Handle CONCAT first.  */
 	if (GET_CODE (op0) == CONCAT && !must_force_mem)
 	  {
-	    if (bitpos == 0
-		&& bitsize == GET_MODE_BITSIZE (GET_MODE (op0))
+	    if (must_eq (bitpos, 0)
+		&& must_eq (bitsize, GET_MODE_BITSIZE (GET_MODE (op0)))
 		&& COMPLEX_MODE_P (mode1)
 		&& COMPLEX_MODE_P (GET_MODE (op0))
 		&& (GET_MODE_PRECISION (GET_MODE_INNER (mode1))
@@ -10601,17 +10593,20 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 		  }
 		return op0;
 	      }
-	    if (bitpos == 0
-		&& bitsize == GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 0)))
-		&& bitsize)
+	    if (must_eq (bitpos, 0)
+		&& must_eq (bitsize,
+			    GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 0))))
+		&& may_ne (bitsize, 0))
 	      {
 		op0 = XEXP (op0, 0);
 		mode2 = GET_MODE (op0);
 	      }
-	    else if (bitpos == GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 0)))
-		     && bitsize == GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 1)))
-		     && bitpos
-		     && bitsize)
+	    else if (must_eq (bitpos,
+			      GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 0))))
+		     && must_eq (bitsize,
+				 GET_MODE_BITSIZE (GET_MODE (XEXP (op0, 1))))
+		     && may_ne (bitpos, 0)
+		     && may_ne (bitsize, 0))
 	      {
 		op0 = XEXP (op0, 1);
 		bitpos = 0;
@@ -10666,13 +10661,14 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 
 	    /* See the comment in expand_assignment for the rationale.  */
 	    if (mode1 != VOIDmode
-		&& bitpos != 0
-		&& bitsize > 0
-		&& (bitpos % bitsize) == 0
-		&& (bitsize % GET_MODE_ALIGNMENT (mode1)) == 0
+		&& may_ne (bitpos, 0)
+		&& may_gt (bitsize, 0)
+		&& multiple_p (bitpos, BITS_PER_UNIT, &bytepos)
+		&& multiple_p (bitpos, bitsize)
+		&& multiple_p (bitsize, GET_MODE_ALIGNMENT (mode1))
 		&& MEM_ALIGN (op0) >= GET_MODE_ALIGNMENT (mode1))
 	      {
-		op0 = adjust_address (op0, mode1, bitpos / BITS_PER_UNIT);
+		op0 = adjust_address (op0, mode1, bytepos);
 		bitpos = 0;
 	      }
 
@@ -10682,7 +10678,9 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 
 	/* If OFFSET is making OP0 more aligned than BIGGEST_ALIGNMENT,
 	   record its alignment as BIGGEST_ALIGNMENT.  */
-	if (MEM_P (op0) && bitpos == 0 && offset != 0
+	if (MEM_P (op0)
+	    && must_eq (bitpos, 0)
+	    && offset != 0
 	    && is_aligning_offset (offset, tem))
 	  set_mem_align (op0, BIGGEST_ALIGNMENT);
 
@@ -10715,37 +10713,37 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	    || (volatilep && TREE_CODE (exp) == COMPONENT_REF
 		&& DECL_BIT_FIELD_TYPE (TREE_OPERAND (exp, 1))
 		&& mode1 != BLKmode
-		&& bitsize < GET_MODE_SIZE (mode1) * BITS_PER_UNIT)
+		&& may_lt (bitsize, GET_MODE_SIZE (mode1) * BITS_PER_UNIT))
 	    /* If the field isn't aligned enough to fetch as a memref,
 	       fetch it as a bit field.  */
 	    || (mode1 != BLKmode
 		&& (((MEM_P (op0)
 		      ? MEM_ALIGN (op0) < GET_MODE_ALIGNMENT (mode1)
-		        || (bitpos % GET_MODE_ALIGNMENT (mode1) != 0)
+			|| !multiple_p (bitpos, GET_MODE_ALIGNMENT (mode1))
 		      : TYPE_ALIGN (TREE_TYPE (tem)) < GET_MODE_ALIGNMENT (mode)
-		        || (bitpos % GET_MODE_ALIGNMENT (mode) != 0))
+			|| !multiple_p (bitpos, GET_MODE_ALIGNMENT (mode)))
 		     && modifier != EXPAND_MEMORY
 		     && ((modifier == EXPAND_CONST_ADDRESS
 			  || modifier == EXPAND_INITIALIZER)
 			 ? STRICT_ALIGNMENT
 			 : targetm.slow_unaligned_access (mode1,
 							  MEM_ALIGN (op0))))
-		    || (bitpos % BITS_PER_UNIT != 0)))
+		    || !multiple_p (bitpos, BITS_PER_UNIT)))
 	    /* If the type and the field are a constant size and the
 	       size of the type isn't the same size as the bitfield,
 	       we must use bitfield operations.  */
-	    || (bitsize >= 0
+	    || (known_size_p (bitsize)
 		&& TYPE_SIZE (TREE_TYPE (exp))
-		&& TREE_CODE (TYPE_SIZE (TREE_TYPE (exp))) == INTEGER_CST
-		&& 0 != compare_tree_int (TYPE_SIZE (TREE_TYPE (exp)),
-					  bitsize)))
+		&& poly_int_tree_p (TYPE_SIZE (TREE_TYPE (exp)))
+		&& may_ne (wi::to_poly_offset (TYPE_SIZE (TREE_TYPE (exp))),
+			   bitsize)))
 	  {
 	    machine_mode ext_mode = mode;
 
 	    if (ext_mode == BLKmode
 		&& ! (target != 0 && MEM_P (op0)
 		      && MEM_P (target)
-		      && bitpos % BITS_PER_UNIT == 0))
+		      && multiple_p (bitpos, BITS_PER_UNIT)))
 	      ext_mode = int_mode_for_size (bitsize, 1).else_blk ();
 
 	    if (ext_mode == BLKmode)
@@ -10755,20 +10753,19 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 
 		/* ??? Unlike the similar test a few lines below, this one is
 		   very likely obsolete.  */
-		if (bitsize == 0)
+		if (must_eq (bitsize, 0))
 		  return target;
 
 		/* In this case, BITPOS must start at a byte boundary and
 		   TARGET, if specified, must be a MEM.  */
 		gcc_assert (MEM_P (op0)
-			    && (!target || MEM_P (target))
-			    && !(bitpos % BITS_PER_UNIT));
+			    && (!target || MEM_P (target)));
 
+		bytepos = exact_div (bitpos, BITS_PER_UNIT);
+		poly_int64 bytesize = bits_to_bytes_round_up (bitsize);
 		emit_block_move (target,
-				 adjust_address (op0, VOIDmode,
-						 bitpos / BITS_PER_UNIT),
-				 GEN_INT ((bitsize + BITS_PER_UNIT - 1)
-					  / BITS_PER_UNIT),
+				 adjust_address (op0, VOIDmode, bytepos),
+				 gen_int_mode (bytesize, Pmode),
 				 (modifier == EXPAND_STACK_PARM
 				  ? BLOCK_OP_CALL_PARM : BLOCK_OP_NORMAL));
 
@@ -10779,7 +10776,7 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	       with SHIFT_COUNT_TRUNCATED == 0 and garbage otherwise.  Always
 	       return 0 for the sake of consistency, as reading a zero-sized
 	       bitfield is valid in Ada and the value is fully specified.  */
-	    if (bitsize == 0)
+	    if (must_eq (bitsize, 0))
 	      return const0_rtx;
 
 	    op0 = validize_mem (op0);
@@ -10812,7 +10809,8 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	      {
 		HOST_WIDE_INT size = GET_MODE_BITSIZE (op0_mode);
 
-		if (bitsize < size
+		gcc_checking_assert (must_le (bitsize, size));
+		if (may_lt (bitsize, size)
 		    && reversep ? !BYTES_BIG_ENDIAN : BYTES_BIG_ENDIAN)
 		  op0 = expand_shift (LSHIFT_EXPR, op0_mode, op0,
 				      size - bitsize, op0, 1);
@@ -10844,11 +10842,12 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	  mode1 = BLKmode;
 
 	/* Get a reference to just this component.  */
+	bytepos = bits_to_bytes_round_down (bitpos);
 	if (modifier == EXPAND_CONST_ADDRESS
 	    || modifier == EXPAND_SUM || modifier == EXPAND_INITIALIZER)
-	  op0 = adjust_address_nv (op0, mode1, bitpos / BITS_PER_UNIT);
+	  op0 = adjust_address_nv (op0, mode1, bytepos);
 	else
-	  op0 = adjust_address (op0, mode1, bitpos / BITS_PER_UNIT);
+	  op0 = adjust_address (op0, mode1, bytepos);
 
 	if (op0 == orig_op0)
 	  op0 = copy_rtx (op0);
@@ -10931,12 +10930,12 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
       /* If we are converting to BLKmode, try to avoid an intermediate
 	 temporary by fetching an inner memory reference.  */
       if (mode == BLKmode
-	  && TREE_CODE (TYPE_SIZE (type)) == INTEGER_CST
+	  && poly_int_tree_p (TYPE_SIZE (type))
 	  && TYPE_MODE (TREE_TYPE (treeop0)) != BLKmode
 	  && handled_component_p (treeop0))
       {
 	machine_mode mode1;
-	HOST_WIDE_INT bitsize, bitpos;
+	poly_int64 bitsize, bitpos, bytepos;
 	tree offset;
 	int unsignedp, reversep, volatilep = 0;
 	tree tem
@@ -10946,10 +10945,10 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 
 	/* ??? We should work harder and deal with non-zero offsets.  */
 	if (!offset
-	    && (bitpos % BITS_PER_UNIT) == 0
+	    && multiple_p (bitpos, BITS_PER_UNIT, &bytepos)
 	    && !reversep
-	    && bitsize >= 0
-	    && compare_tree_int (TYPE_SIZE (type), bitsize) == 0)
+	    && known_size_p (bitsize)
+	    && must_eq (wi::to_poly_offset (TYPE_SIZE (type)), bitsize))
 	  {
 	    /* See the normal_inner_ref case for the rationale.  */
 	    orig_op0
@@ -10971,9 +10970,9 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 		if (modifier == EXPAND_CONST_ADDRESS
 		    || modifier == EXPAND_SUM
 		    || modifier == EXPAND_INITIALIZER)
-		  op0 = adjust_address_nv (op0, mode, bitpos / BITS_PER_UNIT);
+		  op0 = adjust_address_nv (op0, mode, bytepos);
 		else
-		  op0 = adjust_address (op0, mode, bitpos / BITS_PER_UNIT);
+		  op0 = adjust_address (op0, mode, bytepos);
 
 		if (op0 == orig_op0)
 		  op0 = copy_rtx (op0);
