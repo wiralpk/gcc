@@ -445,7 +445,12 @@ can_mult_highpart_p (machine_mode mode, bool uns_p)
   if (GET_MODE_CLASS (mode) != MODE_VECTOR_INT)
     return 0;
 
-  nunits = GET_MODE_NUNITS (mode);
+  /* We need a constant number of elements in order to construct
+     the permute mask below.  */
+  /* ??? Maybe we should have specific optabs for these permutations,
+     so that we can use them even for a variable number of units.  */
+  if (!GET_MODE_NUNITS (mode).is_constant (&nunits))
+    return 0;
 
   op = uns_p ? vec_widen_umult_even_optab : vec_widen_smult_even_optab;
   if (optab_handler (op, mode) != CODE_FOR_nothing)

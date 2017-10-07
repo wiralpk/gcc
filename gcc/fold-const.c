@@ -14684,7 +14684,7 @@ test_vec_duplicate_folding ()
   scalar_int_mode int_mode = SCALAR_INT_TYPE_MODE (ssizetype);
   machine_mode vec_mode = targetm.vectorize.preferred_simd_mode (int_mode);
   /* This will be 1 if VEC_MODE isn't a vector mode.  */
-  unsigned int nunits = GET_MODE_NUNITS (vec_mode);
+  poly_uint64 nunits = GET_MODE_NUNITS (vec_mode);
 
   tree type = build_vector_type (ssizetype, nunits);
   tree dup5 = build_vector_from_val (type, ssize_int (5));
@@ -14718,8 +14718,8 @@ test_vec_series_folding ()
 {
   scalar_int_mode int_mode = SCALAR_INT_TYPE_MODE (ssizetype);
   machine_mode vec_mode = targetm.vectorize.preferred_simd_mode (int_mode);
-  unsigned int nunits = GET_MODE_NUNITS (vec_mode);
-  if (nunits == 1)
+  poly_uint64 nunits = GET_MODE_NUNITS (vec_mode);
+  if (must_eq (nunits, 1U))
     nunits = 4;
 
   tree type = build_vector_type (ssizetype, nunits);

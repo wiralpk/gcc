@@ -5938,8 +5938,8 @@ static GTY((deletable)) rtx spare_vec_duplicate;
 static rtx
 gen_const_vec_duplicate_1 (machine_mode mode, rtx el)
 {
-  int nunits = GET_MODE_NUNITS (mode);
-  if (1)
+  int nunits;
+  if (GET_MODE_NUNITS (mode).is_constant (&nunits))
     {
       rtvec v = rtvec_alloc (nunits);
 
@@ -6036,8 +6036,8 @@ gen_const_vec_series (machine_mode mode, rtx base, rtx step)
 {
   gcc_assert (CONSTANT_P (base) && CONSTANT_P (step));
 
-  int nunits = GET_MODE_NUNITS (mode);
-  if (1)
+  int nunits;
+  if (GET_MODE_NUNITS (mode).is_constant (&nunits))
     {
       rtvec v = rtvec_alloc (nunits);
       scalar_mode inner_mode = GET_MODE_INNER (mode);
@@ -6101,7 +6101,7 @@ gen_const_vector (machine_mode mode, int constant)
 rtx
 gen_rtx_CONST_VECTOR (machine_mode mode, rtvec v)
 {
-  gcc_assert (GET_MODE_NUNITS (mode) == GET_NUM_ELEM (v));
+  gcc_assert (must_eq (GET_MODE_NUNITS (mode), GET_NUM_ELEM (v)));
 
   /* If the values are all the same, check to see if we can use one of the
      standard constant vectors.  */

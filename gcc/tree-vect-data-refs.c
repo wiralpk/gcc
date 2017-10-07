@@ -4568,9 +4568,10 @@ vect_grouped_store_supported (tree vectype, unsigned HOST_WIDE_INT count)
     }
 
   /* Check that the permutation is supported.  */
-  if (VECTOR_MODE_P (mode))
+  unsigned int nelt;
+  if (VECTOR_MODE_P (mode) && GET_MODE_NUNITS (mode).is_constant (&nelt))
     {
-      unsigned int i, nelt = GET_MODE_NUNITS (mode);
+      unsigned int i;
       auto_vec_perm_indices sel (nelt);
       sel.quick_grow (nelt);
 
@@ -5156,9 +5157,10 @@ vect_grouped_load_supported (tree vectype, bool single_element_p,
     }
 
   /* Check that the permutation is supported.  */
-  if (VECTOR_MODE_P (mode))
+  unsigned int nelt;
+  if (VECTOR_MODE_P (mode) && GET_MODE_NUNITS (mode).is_constant (&nelt))
     {
-      unsigned int i, j, nelt = GET_MODE_NUNITS (mode);
+      unsigned int i, j;
       auto_vec_perm_indices sel (nelt);
       sel.quick_grow (nelt);
 

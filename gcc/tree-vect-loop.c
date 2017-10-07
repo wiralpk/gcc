@@ -3750,10 +3750,13 @@ have_whole_vector_shift (machine_mode mode)
   if (direct_optab_handler (vec_perm_const_optab, mode) == CODE_FOR_nothing)
     return false;
 
-  unsigned int i, nelt = GET_MODE_NUNITS (mode);
-  auto_vec_perm_indices sel (nelt);
+  /* Variable-length vectors should be handled via the optab.  */
+  unsigned int nelt;
+  if (!GET_MODE_NUNITS (mode).is_constant (&nelt))
+    return false;
 
-  for (i = nelt/2; i >= 1; i/=2)
+  auto_vec_perm_indices sel (nelt);
+  for (unsigned int i = nelt / 2; i >= 1; i /= 2)
     {
       sel.truncate (0);
       calc_vec_perm_mask_for_shift (i, nelt, &sel);
