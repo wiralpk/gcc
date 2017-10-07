@@ -252,6 +252,9 @@ shared_const_p (const_rtx orig)
 {
   gcc_assert (GET_CODE (orig) == CONST);
 
+  if (unique_const_p (XEXP (orig, 0)))
+    return true;
+
   /* CONST can be shared if it contains a SYMBOL_REF.  If it contains
      a LABEL_REF, it isn't sharable.  */
   return (GET_CODE (XEXP (orig, 0)) == PLUS

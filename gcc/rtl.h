@@ -2861,6 +2861,23 @@ vec_series_p (const_rtx x, rtx *base_out, rtx *step_out)
   return const_vec_series_p (x, base_out, step_out);
 }
 
+/* Return true if there should only ever be one instance of (const X),
+   so that constants of this type can be compared using pointer equality.  */
+
+inline bool
+unique_const_p (const_rtx x)
+{
+  switch (GET_CODE (x))
+    {
+    case VEC_DUPLICATE:
+    case VEC_SERIES:
+      return true;
+
+    default:
+      return false;
+    }
+}
+
 /* Return the unpromoted (outer) mode of SUBREG_PROMOTED_VAR_P subreg X.  */
 
 inline scalar_int_mode
@@ -3570,6 +3587,7 @@ extern rtx_insn *
 gen_rtx_INSN (machine_mode mode, rtx_insn *prev_insn, rtx_insn *next_insn,
 	      basic_block bb, rtx pattern, int location, int code,
 	      rtx reg_notes);
+extern rtx gen_rtx_CONST (machine_mode, rtx);
 extern rtx gen_rtx_CONST_INT (machine_mode, HOST_WIDE_INT);
 extern rtx gen_rtx_CONST_VECTOR (machine_mode, rtvec);
 extern void set_mode_and_regno (rtx, machine_mode, unsigned int);

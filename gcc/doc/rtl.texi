@@ -4300,6 +4300,20 @@ There is only one @code{pc} expression.
 @item
 There is only one @code{cc0} expression.
 
+@cindex @code{const}, RTL sharing
+@item
+There is only one instance of the following structures for a given
+@var{m}, @var{x} and @var{y}:
+@example
+(const:@var{m} (vec_duplicate:@var{m} @var{x}))
+(const:@var{m} (vec_series:@var{m} @var{x} @var{y}))
+@end example
+This means, for example, that for a given @var{n} there is only ever a
+single instance of an expression like:
+@example
+(const:V@var{n}DI (vec_duplicate:V@var{n}DI (const_int 0)))
+@end example
+
 @cindex @code{const_double}, RTL sharing
 @item
 There is only one @code{const_double} expression with value 0 for
