@@ -2643,8 +2643,8 @@ vectorizable_call (gimple *gs, gimple_stmt_iterator *gsi, gimple **vec_stmt,
   tree vec_oprnd0 = NULL_TREE, vec_oprnd1 = NULL_TREE;
   stmt_vec_info stmt_info = vinfo_for_stmt (gs), prev_stmt_info;
   tree vectype_out, vectype_in;
-  int nunits_in;
-  int nunits_out;
+  poly_uint64 nunits_in;
+  poly_uint64 nunits_out;
   loop_vec_info loop_vinfo = STMT_VINFO_LOOP_VINFO (stmt_info);
   bb_vec_info bb_vinfo = STMT_VINFO_BB_VINFO (stmt_info);
   vec_info *vinfo = stmt_info->vinfo;
@@ -2764,11 +2764,11 @@ vectorizable_call (gimple *gs, gimple_stmt_iterator *gsi, gimple **vec_stmt,
   /* FORNOW */
   nunits_in = TYPE_VECTOR_SUBPARTS (vectype_in);
   nunits_out = TYPE_VECTOR_SUBPARTS (vectype_out);
-  if (nunits_in == nunits_out / 2)
+  if (must_eq (nunits_in * 2, nunits_out))
     modifier = NARROW;
-  else if (nunits_out == nunits_in)
+  else if (must_eq (nunits_out, nunits_in))
     modifier = NONE;
-  else if (nunits_out == nunits_in / 2)
+  else if (must_eq (nunits_out * 2, nunits_in))
     modifier = WIDEN;
   else
     return false;
@@ -2967,11 +2967,7 @@ vectorizable_call (gimple *gs, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 	  if (gimple_call_internal_p (stmt)
 	      && gimple_call_internal_fn (stmt) == IFN_GOMP_SIMD_LANE)
 	    {
-	      auto_vec<tree, 32> v (nunits_out);
-	      for (int k = 0; k < nunits_out; ++k)
-		v.quick_push (build_int_cst (unsigned_type_node,
-					     j * nunits_out + k));
-	      tree cst = build_vector (vectype_out, v);
+	      tree cst = build_index_vector (vectype_out, j * nunits_out, 1);
 	      tree new_var
 		= vect_get_new_ssa_name (vectype_out, vect_simple_var, "cst_");
 	      gimple *init_stmt = gimple_build_assign (new_var, cst);
