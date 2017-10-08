@@ -357,6 +357,18 @@ struct rgroup_masks {
 
 typedef auto_vec<rgroup_masks> vec_loop_masks;
 
+/* Represents a scalar iteration count <= VF as both an integer count and a
+   vector mask.  */
+struct vec_niters_and_mask {
+  vec_niters_and_mask () : niters (NULL_TREE), mask (NULL_TREE) {}
+
+  /* The number of scalar iterations as a sizetype integer.  */
+  tree niters;
+
+  /* The mask of scalar iterations, with one element per iteration.  */
+  tree mask;
+};
+
 /*-----------------------------------------------------------------*/
 /* Info on vectorized loops.                                       */
 /*-----------------------------------------------------------------*/
@@ -396,6 +408,10 @@ typedef struct _loop_vec_info : public vec_info {
   /* Maximum runtime vectorization factor, or MAX_VECTORIZATION_FACTOR
      if there is no particular limit.  */
   unsigned HOST_WIDE_INT max_vectorization_factor;
+
+  /* The actual runtime vectorization factor, which is the minimum of
+     VECTORIZATION_FACTOR and MAX_VECTORIZATION_FACTOR.  */
+  vec_niters_and_mask cap;
 
   /* The masks that a fully-masked loop should use to avoid operating
      on inactive scalars.  */
@@ -526,6 +542,10 @@ typedef struct _loop_vec_info : public vec_info {
 
   /* A hash table used for caching vector base addresses.  */
   hash_table<vect_addr_base_hasher> vect_addr_base_htab;
+
+  /* A map from X to a precomputed gimple_val containing
+     CAPPED_VECTORIZATION_FACTOR * X.  */
+  hash_map<tree, tree> vf_mult_map;
 } *loop_vec_info;
 
 /* Access Functions.  */
@@ -545,6 +565,7 @@ typedef struct _loop_vec_info : public vec_info {
 #define LOOP_VINFO_FULLY_MASKED_P(L)       (L)->fully_masked_p
 #define LOOP_VINFO_VECT_FACTOR(L)          (L)->vectorization_factor
 #define LOOP_VINFO_MAX_VECT_FACTOR(L)      (L)->max_vectorization_factor
+#define LOOP_VINFO_CAP(L)                  (L)->cap
 #define LOOP_VINFO_MASKS(L)                (L)->masks
 #define LOOP_VINFO_MASK_SKIP_NITERS(L)     (L)->mask_skip_niters
 #define LOOP_VINFO_MASK_COMPARE_TYPE(L)    (L)->mask_compare_type
@@ -577,6 +598,7 @@ typedef struct _loop_vec_info : public vec_info {
 #define LOOP_VINFO_SINGLE_SCALAR_ITERATION_COST(L) (L)->single_scalar_iteration_cost
 #define LOOP_VINFO_ORIG_LOOP_INFO(L)       (L)->orig_loop_info
 #define LOOP_VINFO_ADDR_CACHE(L)	   (L)->vect_addr_base_htab
+#define LOOP_VINFO_VF_MULT_MAP(L)          (L)->vf_mult_map
 
 #define LOOP_REQUIRES_VERSIONING_FOR_ALIGNMENT(L)	\
   ((L)->may_misalign_stmts.length () > 0)
@@ -1349,6 +1371,19 @@ unlimited_cost_model (loop_p loop)
       && flag_simd_cost_model != VECT_COST_MODEL_DEFAULT)
     return flag_simd_cost_model == VECT_COST_MODEL_UNLIMITED;
   return (flag_vect_cost_model == VECT_COST_MODEL_UNLIMITED);
+}
+
+/* Return true if the loop needs to use a vectorization factor that
+   is capped at run time.  */
+
+static inline bool
+use_capped_vf (loop_vec_info loop_vinfo)
+{
+  return (loop_vinfo
+	  && (LOOP_VINFO_MAX_VECT_FACTOR (loop_vinfo)
+	      != MAX_VECTORIZATION_FACTOR)
+	  && may_lt (LOOP_VINFO_MAX_VECT_FACTOR (loop_vinfo),
+		     LOOP_VINFO_VECT_FACTOR (loop_vinfo)));
 }
 
 /* Return true if the loop described by LOOP_VINFO is fully-masked and

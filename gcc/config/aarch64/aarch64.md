@@ -167,6 +167,7 @@
     UNSPEC_INSR
     UNSPEC_CLASTB
     UNSPEC_FADDA
+    UNSPEC_CNTP
 ])
 
 (define_c_enum "unspecv" [

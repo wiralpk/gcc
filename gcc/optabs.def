@@ -397,4 +397,6 @@ OPTAB_D (mask_scatter_store_optab, "mask_scatter_store$a")
 
 OPTAB_DC (vec_duplicate_optab, "vec_duplicate$a", VEC_DUPLICATE)
 OPTAB_DC (vec_series_optab, "vec_series$a", VEC_SERIES)
+
+OPTAB_D (mask_popcount_optab, "mask_popcount$a")
 OPTAB_D (vec_shl_insert_optab, "vec_shl_insert_$a")

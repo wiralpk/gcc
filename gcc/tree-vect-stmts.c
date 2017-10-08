@@ -110,6 +110,27 @@ record_stmt_cost (stmt_vector_for_cost *body_cost_vec, int count,
 			  count, kind, stmt_info, misalign, where);
 }
 
+/* Return a tree that represents STEP multiplied by the vectorization
+   factor.  */
+
+static tree
+vect_mult_by_vf (loop_vec_info loop_vinfo, tree step)
+{
+  hash_map<tree, tree> *map = &LOOP_VINFO_VF_MULT_MAP (loop_vinfo);
+  bool existed;
+  tree &entry = map->get_or_insert (step, &existed);
+  if (!existed)
+    {
+      gimple_seq seq = NULL;
+      tree vf = LOOP_VINFO_CAP (loop_vinfo).niters;
+      vf = gimple_convert (&seq, TREE_TYPE (step), vf);
+      entry = gimple_build (&seq, MULT_EXPR, TREE_TYPE (step), vf, step);
+      edge pe = loop_preheader_edge (LOOP_VINFO_LOOP (loop_vinfo));
+      gsi_insert_seq_on_edge_immediate (pe, seq);
+    }
+  return entry;
+}
+
 /* Return a variable of type ELEM_TYPE[NELEMS].  */
 
 static tree
@@ -2812,7 +2833,8 @@ vect_get_gather_scatter_ops (struct loop *loop, gimple *stmt,
 static void
 vect_get_strided_load_store_ops (gimple *stmt, loop_vec_info loop_vinfo,
 				 gather_scatter_info *gs_info,
-				 tree *dataref_bump, tree *vec_offset)
+				 tree *iv_step, tree *dataref_bump,
+				 tree *vec_offset)
 {
   stmt_vec_info stmt_info = vinfo_for_stmt (stmt);
   struct data_reference *dr = STMT_VINFO_DATA_REF (stmt_info);
@@ -2826,6 +2848,12 @@ vect_get_strided_load_store_ops (gimple *stmt, loop_vec_info loop_vinfo,
   *dataref_bump = force_gimple_operand (bump, &stmts, true, NULL_TREE);
   if (stmts)
     gsi_insert_seq_on_edge_immediate (loop_preheader_edge (loop), stmts);
+
+  if (use_capped_vf (loop_vinfo))
+    *iv_step = vect_mult_by_vf (loop_vinfo,
+				fold_convert (sizetype, DR_STEP (dr)));
+  else
+    *iv_step = *dataref_bump;
 
   /* The offset given in GS_INFO can have pointer type, so use the element
      type of the vector instead.  */
@@ -2851,18 +2879,32 @@ vect_get_strided_load_store_ops (gimple *stmt, loop_vec_info loop_vinfo,
    being vectorized and MEMORY_ACCESS_TYPE describes the type of
    vectorization.  */
 
-static tree
-vect_get_data_ptr_increment (data_reference *dr, tree aggr_type,
-			     vect_memory_access_type memory_access_type)
+static void
+vect_get_data_ptr_increment (loop_vec_info loop_vinfo, data_reference *dr,
+			     tree aggr_type, unsigned int group_size,
+			     vect_memory_access_type memory_access_type,
+			     tree *iv_step, tree *bump)
 {
   if (memory_access_type == VMAT_INVARIANT)
-    return size_zero_node;
+    {
+      *iv_step = *bump = size_zero_node;
+      return;
+    }
 
-  tree iv_step = TYPE_SIZE_UNIT (aggr_type);
+  *bump = TYPE_SIZE_UNIT (aggr_type);
   tree step = vect_dr_behavior (dr)->step;
   if (tree_int_cst_sgn (step) == -1)
-    iv_step = fold_build1 (NEGATE_EXPR, TREE_TYPE (iv_step), iv_step);
-  return iv_step;
+    *bump = fold_build1 (NEGATE_EXPR, TREE_TYPE (*bump), *bump);
+
+  if (loop_vinfo && use_capped_vf (loop_vinfo))
+    {
+      tree elt_type = TREE_TYPE (DR_REF (dr));
+      tree bytes_per_iter = size_binop (MULT_EXPR, TYPE_SIZE_UNIT (elt_type),
+					size_int (group_size));
+      *iv_step = vect_mult_by_vf (loop_vinfo, bytes_per_iter);
+    }
+  else
+    *iv_step = *bump;
 }
 
 /* Check and perform vectorization of BUILT_IN_BSWAP{16,32,64}.  */
@@ -6717,18 +6759,19 @@ vectorizable_store (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
       || memory_access_type == VMAT_CONTIGUOUS_REVERSE)
     offset = size_int (-TYPE_VECTOR_SUBPARTS (vectype) + 1);
 
-  tree bump;
+  tree bump, iv_step;
   tree vec_offset = NULL_TREE;
   if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
     {
       aggr_type = NULL_TREE;
+      iv_step = NULL_TREE;
       bump = NULL_TREE;
     }
   else if (memory_access_type == VMAT_GATHER_SCATTER)
     {
       aggr_type = elem_type;
       vect_get_strided_load_store_ops (stmt, loop_vinfo, &gs_info,
-				       &bump, &vec_offset);
+				       &iv_step, &bump, &vec_offset);
     }
   else
     {
@@ -6736,7 +6779,8 @@ vectorizable_store (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 	aggr_type = build_array_type_nelts (elem_type, vec_num * nunits);
       else
 	aggr_type = vectype;
-      bump = vect_get_data_ptr_increment (dr, aggr_type, memory_access_type);
+      vect_get_data_ptr_increment (loop_vinfo, dr, aggr_type, group_size,
+				   memory_access_type, &iv_step, &bump);
     }
 
   if (mask)
@@ -6854,7 +6898,7 @@ vectorizable_store (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 					  simd_lane_access_p ? loop : NULL,
 					  offset, &dummy, gsi, &ptr_incr,
 					  simd_lane_access_p, &inv_p,
-					  NULL_TREE, bump);
+					  NULL_TREE, iv_step);
 	  gcc_assert (bb_vinfo || !inv_p);
 	}
       else
@@ -7917,18 +7961,19 @@ vectorizable_load (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
   if (memory_access_type == VMAT_CONTIGUOUS_REVERSE)
     offset = size_int (-TYPE_VECTOR_SUBPARTS (vectype) + 1);
 
-  tree bump;
+  tree bump, iv_step;
   tree vec_offset = NULL_TREE;
   if (STMT_VINFO_GATHER_SCATTER_P (stmt_info))
     {
       aggr_type = NULL_TREE;
+      iv_step = NULL_TREE;
       bump = NULL_TREE;
     }
   else if (memory_access_type == VMAT_GATHER_SCATTER)
     {
       aggr_type = elem_type;
       vect_get_strided_load_store_ops (stmt, loop_vinfo, &gs_info,
-				       &bump, &vec_offset);
+				       &iv_step, &bump, &vec_offset);
     }
   else
     {
@@ -7936,7 +7981,8 @@ vectorizable_load (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 	aggr_type = build_array_type_nelts (elem_type, vec_num * nunits);
       else
 	aggr_type = vectype;
-      bump = vect_get_data_ptr_increment (dr, aggr_type, memory_access_type);
+      vect_get_data_ptr_increment (loop_vinfo, dr, aggr_type, group_size,
+				   memory_access_type, &iv_step, &bump);
     }
 
   tree vec_mask = NULL_TREE;
@@ -7971,7 +8017,7 @@ vectorizable_load (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 		= vect_create_data_ref_ptr (first_stmt_for_drptr, aggr_type,
 					    at_loop, offset, &dummy, gsi,
 					    &ptr_incr, simd_lane_access_p,
-					    &inv_p, byte_offset, bump);
+					    &inv_p, byte_offset, iv_step);
 	      /* Adjust the pointer by the difference to first_stmt.  */
 	      data_reference_p ptrdr
 		= STMT_VINFO_DATA_REF (vinfo_for_stmt (first_stmt_for_drptr));
@@ -7993,7 +8039,7 @@ vectorizable_load (gimple *stmt, gimple_stmt_iterator *gsi, gimple **vec_stmt,
 	      = vect_create_data_ref_ptr (first_stmt, aggr_type, at_loop,
 					  offset, &dummy, gsi, &ptr_incr,
 					  simd_lane_access_p, &inv_p,
-					  byte_offset, bump);
+					  byte_offset, iv_step);
 	  if (mask)
 	    vec_mask = vect_get_vec_def_for_operand (mask, stmt,
 						     mask_vectype);

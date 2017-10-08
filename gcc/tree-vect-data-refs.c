@@ -53,6 +53,7 @@ along with GCC; see the file COPYING3.  If not see
 #include "tree-cfg.h"
 #include "tree-hash-traits.h"
 #include "internal-fn.h"
+#include "gimple-fold.h"
 
 /* Return true if load- or store-lanes optab OPTAB is implemented for
    COUNT vectors of type VECTYPE.  NAME is the name of OPTAB.  */
@@ -4782,7 +4783,6 @@ vect_create_addr_base_for_vector_ref (gimple *stmt,
   return entry->final_addr;
 }
 
-
 /* Function vect_create_data_ref_ptr.
 
    Create a new pointer-to-AGGR_TYPE variable (ap), that points to the first
@@ -5013,6 +5013,9 @@ vect_create_data_ref_ptr (gimple *stmt, tree aggr_type, struct loop *at_loop,
     {
       if (iv_step == NULL_TREE)
 	{
+	  /* The caller must provide an IV_STEP for capped VF.  */
+	  gcc_assert (!use_capped_vf (loop_vinfo));
+
 	  /* The step of the aggregate pointer is the type size.  */
 	  iv_step = TYPE_SIZE_UNIT (aggr_type);
 	  /* One exception to the above is when the scalar step of the load in
@@ -5143,7 +5146,7 @@ bump_vector_ptr (tree dataref_ptr, gimple *ptr_incr, gimple_stmt_iterator *gsi,
       mark_ptr_info_alignment_unknown (SSA_NAME_PTR_INFO (new_dataref_ptr));
     }
 
-  if (!ptr_incr)
+  if (!ptr_incr || use_capped_vf (STMT_VINFO_LOOP_VINFO (stmt_info)))
     return new_dataref_ptr;
 
   /* Update the vector-pointer's cross-iteration increment.  */
