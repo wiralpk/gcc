@@ -4734,11 +4734,7 @@ vect_permute_store_chain (vec<tree> dr_chain,
   tree perm_mask_low, perm_mask_high;
   tree data_ref;
   tree perm3_mask_low, perm3_mask_high;
-  unsigned int i, n, log_length = exact_log2 (length);
-  unsigned int j, nelt = TYPE_VECTOR_SUBPARTS (vectype);
-
-  auto_vec_perm_indices sel (nelt);
-  sel.quick_grow (nelt);
+  unsigned int i, j, n, log_length = exact_log2 (length);
 
   result_chain->quick_grow (length);
   memcpy (result_chain->address (), dr_chain.address (),
@@ -4746,8 +4742,12 @@ vect_permute_store_chain (vec<tree> dr_chain,
 
   if (length == 3)
     {
+      /* vect_grouped_store_supported ensures that this is constant.  */
+      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype);
       unsigned int j0 = 0, j1 = 0, j2 = 0;
 
+      auto_vec_perm_indices sel (nelt);
+      sel.quick_grow (nelt);
       for (j = 0; j < 3; j++)
         {
 	  int nelt0 = ((3 - j) * nelt) % 3;
@@ -4806,6 +4806,10 @@ vect_permute_store_chain (vec<tree> dr_chain,
       /* If length is not equal to 3 then only power of 2 is supported.  */
       gcc_assert (pow2p_hwi (length));
 
+      /* vect_grouped_store_supported ensures that this is constant.  */
+      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      auto_vec_perm_indices sel (nelt);
+      sel.quick_grow (nelt);
       for (i = 0, n = nelt / 2; i < n; i++)
 	{
 	  sel[i * 2] = i;
@@ -5321,10 +5325,6 @@ vect_permute_load_chain (vec<tree> dr_chain,
   gimple *perm_stmt;
   tree vectype = STMT_VINFO_VECTYPE (vinfo_for_stmt (stmt));
   unsigned int i, j, log_length = exact_log2 (length);
-  unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
-
-  auto_vec_perm_indices sel (nelt);
-  sel.quick_grow (nelt);
 
   result_chain->quick_grow (length);
   memcpy (result_chain->address (), dr_chain.address (),
@@ -5332,8 +5332,12 @@ vect_permute_load_chain (vec<tree> dr_chain,
 
   if (length == 3)
     {
+      /* vect_grouped_load_supported ensures that this is constant.  */
+      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
       unsigned int k;
 
+      auto_vec_perm_indices sel (nelt);
+      sel.quick_grow (nelt);
       for (k = 0; k < 3; k++)
 	{
 	  for (i = 0; i < nelt; i++)
@@ -5379,6 +5383,10 @@ vect_permute_load_chain (vec<tree> dr_chain,
       /* If length is not equal to 3 then only power of 2 is supported.  */
       gcc_assert (pow2p_hwi (length));
 
+      /* vect_grouped_load_supported ensures that this is constant.  */
+      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      auto_vec_perm_indices sel (nelt);
+      sel.quick_grow (nelt);
       for (i = 0; i < nelt; ++i)
 	sel[i] = i * 2;
       perm_mask_even = vect_gen_perm_mask_checked (vectype, sel);
