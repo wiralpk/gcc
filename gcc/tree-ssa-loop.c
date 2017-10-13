@@ -620,6 +620,7 @@ for_each_index (tree *addr_p, bool (*cbck) (tree, tree *, void *), void *data)
 	case VEC_SERIES_CST:
 	case COMPLEX_CST:
 	case INTEGER_CST:
+	case POLY_INT_CST:
 	case REAL_CST:
 	case FIXED_CST:
 	case CONSTRUCTOR:

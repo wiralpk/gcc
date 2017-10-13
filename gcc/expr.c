@@ -7718,6 +7718,8 @@ const_vector_element (scalar_mode mode, const_tree elt)
     return const_double_from_real_value (TREE_REAL_CST (elt), mode);
   if (TREE_CODE (elt) == FIXED_CST)
     return CONST_FIXED_FROM_FIXED_VALUE (TREE_FIXED_CST (elt), mode);
+  if (POLY_INT_CST_P (elt))
+    return immed_wide_int_const (poly_int_cst_value (elt), mode);
   return immed_wide_int_const (wi::to_wide (elt), mode);
 }
 
@@ -10113,6 +10115,9 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
 	return replace_equiv_address (temp,
 				      copy_rtx (XEXP (temp, 0)));
       return temp;
+
+    case POLY_INT_CST:
+      return immed_wide_int_const (poly_int_cst_value (exp), mode);
 
     case SAVE_EXPR:
       {
