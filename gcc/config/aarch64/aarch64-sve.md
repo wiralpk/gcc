@@ -630,6 +630,19 @@
   }
 )
 
+(define_expand "<perm_optab>_<mode>"
+  [(set (match_operand:SVE_ALL 0 "register_operand")
+	(unspec:SVE_ALL [(match_operand:SVE_ALL 1 "register_operand")
+			 (match_operand:SVE_ALL 2 "register_operand")]
+			OPTAB_PERMUTE))]
+  "TARGET_SVE && !GET_MODE_NUNITS (<MODE>mode).is_constant ()")
+
+(define_expand "vec_reverse_<mode>"
+  [(set (match_operand:SVE_ALL 0 "register_operand")
+	(unspec:SVE_ALL [(match_operand:SVE_ALL 1 "register_operand")]
+			UNSPEC_REV))]
+  "TARGET_SVE && !GET_MODE_NUNITS (<MODE>mode).is_constant ()")
+
 (define_insn "*aarch64_sve_tbl<mode>"
   [(set (match_operand:SVE_ALL 0 "register_operand" "=w")
 	(unspec:SVE_ALL

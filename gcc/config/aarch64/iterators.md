@@ -1576,6 +1576,11 @@
 				    (UNSPEC_PACI1716 "8")
 				    (UNSPEC_AUTI1716 "12")])
 
+(define_int_attr perm_optab [(UNSPEC_ZIP1 "vec_interleave_lo")
+			     (UNSPEC_ZIP2 "vec_interleave_hi")
+			     (UNSPEC_UZP1 "vec_extract_even")
+			     (UNSPEC_UZP2 "vec_extract_odd")])
+
 (define_int_attr perm_insn [(UNSPEC_ZIP1 "zip") (UNSPEC_ZIP2 "zip")
 			    (UNSPEC_TRN1 "trn") (UNSPEC_TRN2 "trn")
 			    (UNSPEC_UZP1 "uzp") (UNSPEC_UZP2 "uzp")])
