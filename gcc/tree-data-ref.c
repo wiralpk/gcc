@@ -3788,7 +3788,9 @@ analyze_siv_subscript (tree chrec_a,
 				      overlaps_b, overlaps_a, last_conflicts);
 
   else if (evolution_function_is_affine_in_loop (chrec_a, loop_nest_num)
-	   && evolution_function_is_affine_in_loop (chrec_b, loop_nest_num))
+	   && evolution_function_right_is_integer_cst (chrec_a)
+	   && evolution_function_is_affine_in_loop (chrec_b, loop_nest_num)
+	   && evolution_function_right_is_integer_cst (chrec_b))
     {
       if (!chrec_contains_symbols (chrec_a)
 	  && !chrec_contains_symbols (chrec_b))
@@ -3922,8 +3924,10 @@ analyze_miv_subscript (tree chrec_a,
 
   else if (evolution_function_is_affine_multivariate_p (chrec_a, loop_nest->num)
 	   && !chrec_contains_symbols (chrec_a)
+	   && evolution_function_right_is_integer_cst (chrec_a)
 	   && evolution_function_is_affine_multivariate_p (chrec_b, loop_nest->num)
-	   && !chrec_contains_symbols (chrec_b))
+	   && !chrec_contains_symbols (chrec_b)
+	   && evolution_function_right_is_integer_cst (chrec_b))
     {
       /* testsuite/.../ssa-chrec-35.c
 	 {0, +, 1}_2  vs.  {0, +, 1}_3
