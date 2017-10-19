@@ -294,15 +294,15 @@ warn_uninitialized_vars (bool warn_possibly_uninitialized)
 
 	      /* Do not warn if the access is fully outside of the
 	         variable.  */
+	      poly_int64 decl_size;
 	      if (DECL_P (base)
-		  && ref.size != -1
-		  && ref.max_size == ref.size
-		  && (ref.offset + ref.size <= 0
-		      || (ref.offset >= 0
+		  && known_size_p (ref.size)
+		  && must_eq (ref.max_size, ref.size)
+		  && (must_le (ref.offset + ref.size, 0)
+		      || (must_ge (ref.offset, 0)
 			  && DECL_SIZE (base)
-			  && TREE_CODE (DECL_SIZE (base)) == INTEGER_CST
-			  && compare_tree_int (DECL_SIZE (base),
-					       ref.offset) <= 0)))
+			  && poly_int_tree_p (DECL_SIZE (base), &decl_size)
+			  && must_le (decl_size, ref.offset))))
 		continue;
 
 	      /* Do not warn if the access is then used for a BIT_INSERT_EXPR. */
