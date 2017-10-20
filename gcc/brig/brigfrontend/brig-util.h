@@ -81,7 +81,7 @@ bool hsa_type_packed_p (BrigType16_t type);
 inline unsigned HOST_WIDE_INT
 gccbrig_type_vector_subparts (const_tree type)
 {
-  return TYPE_VECTOR_SUBPARTS (type);
+  return TYPE_VECTOR_SUBPARTS (type).to_constant ();
 }
 
 #endif

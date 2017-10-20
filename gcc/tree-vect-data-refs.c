@@ -4743,7 +4743,7 @@ vect_permute_store_chain (vec<tree> dr_chain,
   if (length == 3)
     {
       /* vect_grouped_store_supported ensures that this is constant.  */
-      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
       unsigned int j0 = 0, j1 = 0, j2 = 0;
 
       auto_vec_perm_indices sel (nelt);
@@ -4807,7 +4807,7 @@ vect_permute_store_chain (vec<tree> dr_chain,
       gcc_assert (pow2p_hwi (length));
 
       /* vect_grouped_store_supported ensures that this is constant.  */
-      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      unsigned int nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
       auto_vec_perm_indices sel (nelt);
       sel.quick_grow (nelt);
       for (i = 0, n = nelt / 2; i < n; i++)
@@ -5140,7 +5140,7 @@ vect_grouped_load_supported (tree vectype, bool single_element_p,
      that leaves unused vector loads around punt - we at least create
      very sub-optimal code in that case (and blow up memory,
      see PR65518).  */
-  if (single_element_p && count > TYPE_VECTOR_SUBPARTS (vectype))
+  if (single_element_p && may_gt (count, TYPE_VECTOR_SUBPARTS (vectype)))
     {
       if (dump_enabled_p ())
 	dump_printf_loc (MSG_MISSED_OPTIMIZATION, vect_location,
@@ -5333,7 +5333,7 @@ vect_permute_load_chain (vec<tree> dr_chain,
   if (length == 3)
     {
       /* vect_grouped_load_supported ensures that this is constant.  */
-      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
       unsigned int k;
 
       auto_vec_perm_indices sel (nelt);
@@ -5384,7 +5384,7 @@ vect_permute_load_chain (vec<tree> dr_chain,
       gcc_assert (pow2p_hwi (length));
 
       /* vect_grouped_load_supported ensures that this is constant.  */
-      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
+      unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype).to_constant ();
       auto_vec_perm_indices sel (nelt);
       sel.quick_grow (nelt);
       for (i = 0; i < nelt; ++i)
@@ -5525,12 +5525,12 @@ vect_shift_permute_load_chain (vec<tree> dr_chain,
 
   tree vectype = STMT_VINFO_VECTYPE (vinfo_for_stmt (stmt));
   unsigned int i;
-  unsigned nelt = TYPE_VECTOR_SUBPARTS (vectype);
   stmt_vec_info stmt_info = vinfo_for_stmt (stmt);
   loop_vec_info loop_vinfo = STMT_VINFO_LOOP_VINFO (stmt_info);
 
-  unsigned HOST_WIDE_INT vf;
-  if (!LOOP_VINFO_VECT_FACTOR (loop_vinfo).is_constant (&vf))
+  unsigned HOST_WIDE_INT nelt, vf;
+  if (!TYPE_VECTOR_SUBPARTS (vectype).is_constant (&nelt)
+      || !LOOP_VINFO_VECT_FACTOR (loop_vinfo).is_constant (&vf))
     /* Not supported for variable-length vectors.  */
     return false;
 

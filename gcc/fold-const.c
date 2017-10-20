@@ -1645,7 +1645,7 @@ const_binop (enum tree_code code, tree type, tree arg1, tree arg2)
 	in_nelts = VECTOR_CST_NELTS (arg1);
 	out_nelts = in_nelts * 2;
 	gcc_assert (in_nelts == VECTOR_CST_NELTS (arg2)
-		    && out_nelts == TYPE_VECTOR_SUBPARTS (type));
+		    && must_eq (out_nelts, TYPE_VECTOR_SUBPARTS (type)));
 
 	auto_vec<tree, 32> elts (out_nelts);
 	for (i = 0; i < out_nelts; i++)
@@ -1677,7 +1677,7 @@ const_binop (enum tree_code code, tree type, tree arg1, tree arg2)
 	in_nelts = VECTOR_CST_NELTS (arg1);
 	out_nelts = in_nelts / 2;
 	gcc_assert (in_nelts == VECTOR_CST_NELTS (arg2)
-		    && out_nelts == TYPE_VECTOR_SUBPARTS (type));
+		    && must_eq (out_nelts, TYPE_VECTOR_SUBPARTS (type)));
 
 	if (code == VEC_WIDEN_MULT_LO_EXPR)
 	  scale = 0, ofs = BYTES_BIG_ENDIAN ? out_nelts : 0;
@@ -1841,7 +1841,7 @@ const_unop (enum tree_code code, tree type, tree arg0)
 
 	in_nelts = VECTOR_CST_NELTS (arg0);
 	out_nelts = in_nelts / 2;
-	gcc_assert (out_nelts == TYPE_VECTOR_SUBPARTS (type));
+	gcc_assert (must_eq (out_nelts, TYPE_VECTOR_SUBPARTS (type)));
 
 	unsigned int offset = 0;
 	if ((!BYTES_BIG_ENDIAN) ^ (code == VEC_UNPACK_LO_EXPR
@@ -2329,7 +2329,7 @@ fold_convert_const (enum tree_code code, tree type, tree arg1)
   else if (TREE_CODE (type) == VECTOR_TYPE)
     {
       if (TREE_CODE (arg1) == VECTOR_CST
-	  && TYPE_VECTOR_SUBPARTS (type) == VECTOR_CST_NELTS (arg1))
+	  && must_eq (TYPE_VECTOR_SUBPARTS (type), VECTOR_CST_NELTS (arg1)))
 	{
 	  int len = VECTOR_CST_NELTS (arg1);
 	  tree elttype = TREE_TYPE (type);
@@ -2345,8 +2345,8 @@ fold_convert_const (enum tree_code code, tree type, tree arg1)
 	  return build_vector (type, v);
 	}
       if (TREE_CODE (arg1) == VEC_DUPLICATE_CST
-	  && (TYPE_VECTOR_SUBPARTS (type)
-	      == TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1))))
+	  && must_eq (TYPE_VECTOR_SUBPARTS (type),
+		      TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1))))
 	{
 	  tree sub = fold_convert_const (code, TREE_TYPE (type),
 					 VEC_DUPLICATE_CST_ELT (arg1));
@@ -3491,8 +3491,8 @@ operand_equal_p (const_tree arg0, const_tree arg1, unsigned int flags)
 	     We only tested element precision and modes to match.
 	     Vectors may be BLKmode and thus also check that the number of
 	     parts match.  */
-	  if (TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0))
-	      != TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1)))
+	  if (may_ne (TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0)),
+		      TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1))))
 	    return 0;
 
 	  vec<constructor_elt, va_gc> *v0 = CONSTRUCTOR_ELTS (arg0);
@@ -7596,15 +7596,16 @@ native_interpret_complex (tree type, const unsigned char *ptr, int len)
    If the buffer cannot be interpreted, return NULL_TREE.  */
 
 static tree
-native_interpret_vector (tree type, const unsigned char *ptr, int len)
+native_interpret_vector (tree type, const unsigned char *ptr, unsigned int len)
 {
   tree etype, elem;
-  int i, size, count;
+  unsigned int i, size;
+  unsigned HOST_WIDE_INT count;
 
   etype = TREE_TYPE (type);
   size = GET_MODE_SIZE (SCALAR_TYPE_MODE (etype));
-  count = TYPE_VECTOR_SUBPARTS (type);
-  if (size * count > len)
+  if (!TYPE_VECTOR_SUBPARTS (type).is_constant (&count)
+      || size * count > len)
     return NULL_TREE;
 
   auto_vec<tree, 32> elements (count);
@@ -7690,7 +7691,8 @@ fold_view_convert_expr (tree type, tree expr)
   tree expr_type = TREE_TYPE (expr);
   if (TREE_CODE (expr) == VEC_DUPLICATE_CST
       && VECTOR_TYPE_P (type)
-      && TYPE_VECTOR_SUBPARTS (type) == TYPE_VECTOR_SUBPARTS (expr_type)
+      && must_eq (TYPE_VECTOR_SUBPARTS (type),
+		  TYPE_VECTOR_SUBPARTS (expr_type))
       && TYPE_SIZE (TREE_TYPE (type)) == TYPE_SIZE (TREE_TYPE (expr_type)))
     {
       tree sub = fold_view_convert_expr (TREE_TYPE (type),
@@ -9008,9 +9010,9 @@ fold_vec_perm (tree type, tree arg0, tree arg1, vec_perm_indices sel)
   bool need_ctor = false;
 
   unsigned int nelts = sel.length ();
-  gcc_assert (TYPE_VECTOR_SUBPARTS (type) == nelts
-	      && TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0)) == nelts
-	      && TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1)) == nelts);
+  gcc_assert (must_eq (TYPE_VECTOR_SUBPARTS (type), nelts)
+	      && must_eq (TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0)), nelts)
+	      && must_eq (TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg1)), nelts));
   if (TREE_TYPE (TREE_TYPE (arg0)) != TREE_TYPE (type)
       || TREE_TYPE (TREE_TYPE (arg1)) != TREE_TYPE (type))
     return NULL_TREE;
@@ -11410,7 +11412,7 @@ fold_ternary_loc (location_t loc, enum tree_code code, tree type,
 		  || TREE_CODE (arg2) == CONSTRUCTOR))
 	    {
 	      unsigned int nelts = VECTOR_CST_NELTS (arg0), i;
-	      gcc_assert (nelts == TYPE_VECTOR_SUBPARTS (type));
+	      gcc_assert (must_eq (nelts, TYPE_VECTOR_SUBPARTS (type)));
 	      auto_vec_perm_indices sel (nelts);
 	      for (i = 0; i < nelts; i++)
 		{
@@ -11676,7 +11678,8 @@ fold_ternary_loc (location_t loc, enum tree_code code, tree type,
 	  if (n != 0
 	      && (idx % width) == 0
 	      && (n % width) == 0
-	      && ((idx + n) / width) <= TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0)))
+	      && must_le ((idx + n) / width,
+			  TYPE_VECTOR_SUBPARTS (TREE_TYPE (arg0))))
 	    {
 	      idx = idx / width;
 	      n = n / width;
@@ -11753,7 +11756,7 @@ fold_ternary_loc (location_t loc, enum tree_code code, tree type,
 
 	  mask2 = 2 * nelts - 1;
 	  mask = single_arg ? (nelts - 1) : mask2;
-	  gcc_assert (nelts == TYPE_VECTOR_SUBPARTS (type));
+	  gcc_assert (must_eq (nelts, TYPE_VECTOR_SUBPARTS (type)));
 	  auto_vec_perm_indices sel (nelts);
 	  auto_vec_perm_indices sel2 (nelts);
 	  for (i = 0; i < nelts; i++)
@@ -14010,7 +14013,7 @@ fold_relational_const (enum tree_code code, tree type, tree op0, tree op1)
 	}
       unsigned count = VECTOR_CST_NELTS (op0);
       gcc_assert (VECTOR_CST_NELTS (op1) == count
-		  && TYPE_VECTOR_SUBPARTS (type) == count);
+		  && must_eq (TYPE_VECTOR_SUBPARTS (type), count));
 
       auto_vec<tree, 32> elts (count);
       for (unsigned i = 0; i < count; i++)

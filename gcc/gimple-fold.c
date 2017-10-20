@@ -6026,13 +6026,13 @@ gimple_fold_stmt_to_constant_1 (gimple *stmt, tree (*valueize) (tree),
 		}
 	      else if (TREE_CODE (rhs) == CONSTRUCTOR
 		       && TREE_CODE (TREE_TYPE (rhs)) == VECTOR_TYPE
-		       && (CONSTRUCTOR_NELTS (rhs)
-			   == TYPE_VECTOR_SUBPARTS (TREE_TYPE (rhs))))
+		       && must_eq (CONSTRUCTOR_NELTS (rhs),
+				   TYPE_VECTOR_SUBPARTS (TREE_TYPE (rhs))))
 		{
 		  unsigned i, nelts;
 		  tree val;
 
-		  nelts = TYPE_VECTOR_SUBPARTS (TREE_TYPE (rhs));
+		  nelts = CONSTRUCTOR_NELTS (rhs);
 		  auto_vec<tree, 32> vec (nelts);
 		  FOR_EACH_CONSTRUCTOR_VALUE (CONSTRUCTOR_ELTS (rhs), i, val)
 		    {
@@ -6877,8 +6877,8 @@ gimple_fold_indirect_ref (tree t)
             = tree_to_shwi (part_width) / BITS_PER_UNIT;
           unsigned HOST_WIDE_INT indexi = offset * BITS_PER_UNIT;
           tree index = bitsize_int (indexi);
-          if (offset / part_widthi
-	      < TYPE_VECTOR_SUBPARTS (TREE_TYPE (addrtype)))
+	  if (must_lt (offset / part_widthi,
+		       TYPE_VECTOR_SUBPARTS (TREE_TYPE (addrtype))))
             return fold_build3 (BIT_FIELD_REF, type, TREE_OPERAND (addr, 0),
                                 part_width, index);
 	}
@@ -7180,6 +7180,10 @@ tree
 gimple_build_vector_from_val (gimple_seq *seq, location_t loc, tree type,
 			      tree op)
 {
+  if (!TYPE_VECTOR_SUBPARTS (type).is_constant ()
+      && !CONSTANT_CLASS_P (op))
+    return gimple_build (seq, loc, VEC_DUPLICATE_EXPR, type, op);
+
   tree res, vec = build_vector_from_val (type, op);
   if (is_gimple_val (vec))
     return vec;
@@ -7202,7 +7206,7 @@ gimple_build_vector (gimple_seq *seq, location_t loc, tree type,
 		     vec<tree> elts)
 {
   unsigned int nelts = elts.length ();
-  gcc_assert (nelts == TYPE_VECTOR_SUBPARTS (type));
+  gcc_assert (must_eq (nelts, TYPE_VECTOR_SUBPARTS (type)));
   for (unsigned int i = 0; i < nelts; ++i)
     if (!TREE_CONSTANT (elts[i]))
       {
