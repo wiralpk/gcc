@@ -1846,29 +1846,12 @@ aarch64_force_temporary (machine_mode mode, rtx x, rtx value)
     return force_reg (mode, value);
   else
     {
-      x = aarch64_emit_move (x, value);
+      gcc_assert (x);
+      aarch64_emit_move (x, value);
       return x;
     }
 }
 
-
-static rtx
-aarch64_add_offset (scalar_int_mode mode, rtx temp, rtx reg,
-		    HOST_WIDE_INT offset)
-{
-  if (!aarch64_plus_immediate (GEN_INT (offset), mode))
-    {
-      rtx high;
-      /* Load the full offset into a register.  This
-         might be improvable in the future.  */
-      high = GEN_INT (offset);
-      offset = 0;
-      high = aarch64_force_temporary (mode, temp, high);
-      reg = aarch64_force_temporary (mode, temp,
-				     gen_rtx_PLUS (mode, high, reg));
-    }
-  return plus_constant (mode, reg, offset);
-}
 
 static int
 aarch64_internal_mov_immediate (rtx dest, rtx imm, bool generate,
@@ -1994,12 +1977,83 @@ aarch64_internal_mov_immediate (rtx dest, rtx imm, bool generate,
   return num_insns;
 }
 
-/* Add DELTA to REGNUM in mode MODE.  SCRATCHREG can be used to hold a
-   temporary value if necessary.  FRAME_RELATED_P should be true if
-   the RTX_FRAME_RELATED flag should be set and CFA adjustments added
-   to the generated instructions.  If SCRATCHREG is known to hold
-   abs (delta), EMIT_MOVE_IMM can be set to false to avoid emitting the
-   immediate again.
+/* A subroutine of aarch64_add_offset that handles the case in which
+   OFFSET is known at compile time.  The arguments are otherwise the same.  */
+
+static void
+aarch64_add_offset_1 (scalar_int_mode mode, rtx dest,
+		      rtx src, HOST_WIDE_INT offset, rtx temp1,
+		      bool frame_related_p, bool emit_move_imm)
+{
+  gcc_assert (emit_move_imm || temp1 != NULL_RTX);
+  gcc_assert (temp1 == NULL_RTX || !reg_overlap_mentioned_p (temp1, src));
+
+  HOST_WIDE_INT moffset = abs_hwi (offset);
+  rtx_insn *insn;
+
+  if (!moffset)
+    {
+      if (!rtx_equal_p (dest, src))
+	{
+	  insn = emit_insn (gen_rtx_SET (dest, src));
+	  RTX_FRAME_RELATED_P (insn) = frame_related_p;
+	}
+      return;
+    }
+
+  /* Single instruction adjustment.  */
+  if (aarch64_uimm12_shift (moffset))
+    {
+      insn = emit_insn (gen_add3_insn (dest, src, GEN_INT (offset)));
+      RTX_FRAME_RELATED_P (insn) = frame_related_p;
+      return;
+    }
+
+  /* Emit 2 additions/subtractions if the adjustment is less than 24 bits
+     and either:
+
+     a) the offset cannot be loaded by a 16-bit move or
+     b) there is no spare register into which we can move it.  */
+  if (moffset < 0x1000000
+      && ((!temp1 && !can_create_pseudo_p ())
+	  || !aarch64_move_imm (moffset, mode)))
+    {
+      HOST_WIDE_INT low_off = moffset & 0xfff;
+
+      low_off = offset < 0 ? -low_off : low_off;
+      insn = emit_insn (gen_add3_insn (dest, src, GEN_INT (low_off)));
+      RTX_FRAME_RELATED_P (insn) = frame_related_p;
+      insn = emit_insn (gen_add2_insn (dest, GEN_INT (offset - low_off)));
+      RTX_FRAME_RELATED_P (insn) = frame_related_p;
+      return;
+    }
+
+  /* Emit a move immediate if required and an addition/subtraction.  */
+  if (emit_move_imm)
+    {
+      gcc_assert (temp1 != NULL_RTX || can_create_pseudo_p ());
+      temp1 = aarch64_force_temporary (mode, temp1, GEN_INT (moffset));
+    }
+  insn = emit_insn (offset < 0
+		    ? gen_sub3_insn (dest, src, temp1)
+		    : gen_add3_insn (dest, src, temp1));
+  if (frame_related_p)
+    {
+      RTX_FRAME_RELATED_P (insn) = frame_related_p;
+      rtx adj = plus_constant (mode, src, offset);
+      add_reg_note (insn, REG_CFA_ADJUST_CFA, gen_rtx_SET (dest, adj));
+    }
+}
+
+/* Set DEST to SRC + OFFSET.  MODE is the mode of the addition.
+   FRAME_RELATED_P is true if the RTX_FRAME_RELATED flag should
+   be set and CFA adjustments added to the generated instructions.
+
+   TEMP1, if nonnull, is a register of mode MODE that can be used as a
+   temporary if register allocation is already complete.  This temporary
+   register may overlap DEST but must not overlap SRC.  If TEMP1 is known
+   to hold abs (OFFSET), EMIT_MOVE_IMM can be set to false to avoid emitting
+   the immediate again.
 
    Since this function may be used to adjust the stack pointer, we must
    ensure that it cannot cause transient stack deallocation (for example
@@ -2007,73 +2061,39 @@ aarch64_internal_mov_immediate (rtx dest, rtx imm, bool generate,
    large immediate).  */
 
 static void
-aarch64_add_constant_internal (scalar_int_mode mode, int regnum,
-			       int scratchreg, HOST_WIDE_INT delta,
-			       bool frame_related_p, bool emit_move_imm)
+aarch64_add_offset (scalar_int_mode mode, rtx dest, rtx src,
+		    poly_int64 offset, rtx temp1, bool frame_related_p,
+		    bool emit_move_imm = true)
 {
-  HOST_WIDE_INT mdelta = abs_hwi (delta);
-  rtx this_rtx = gen_rtx_REG (mode, regnum);
-  rtx_insn *insn;
+  gcc_assert (emit_move_imm || temp1 != NULL_RTX);
+  gcc_assert (temp1 == NULL_RTX || !reg_overlap_mentioned_p (temp1, src));
 
-  if (!mdelta)
-    return;
-
-  /* Single instruction adjustment.  */
-  if (aarch64_uimm12_shift (mdelta))
-    {
-      insn = emit_insn (gen_add2_insn (this_rtx, GEN_INT (delta)));
-      RTX_FRAME_RELATED_P (insn) = frame_related_p;
-      return;
-    }
-
-  /* Emit 2 additions/subtractions if the adjustment is less than 24 bits.
-     Only do this if mdelta is not a 16-bit move as adjusting using a move
-     is better.  */
-  if (mdelta < 0x1000000 && !aarch64_move_imm (mdelta, mode))
-    {
-      HOST_WIDE_INT low_off = mdelta & 0xfff;
-
-      low_off = delta < 0 ? -low_off : low_off;
-      insn = emit_insn (gen_add2_insn (this_rtx, GEN_INT (low_off)));
-      RTX_FRAME_RELATED_P (insn) = frame_related_p;
-      insn = emit_insn (gen_add2_insn (this_rtx, GEN_INT (delta - low_off)));
-      RTX_FRAME_RELATED_P (insn) = frame_related_p;
-      return;
-    }
-
-  /* Emit a move immediate if required and an addition/subtraction.  */
-  rtx scratch_rtx = gen_rtx_REG (mode, scratchreg);
-  if (emit_move_imm)
-    aarch64_internal_mov_immediate (scratch_rtx, GEN_INT (mdelta), true, mode);
-  insn = emit_insn (delta < 0 ? gen_sub2_insn (this_rtx, scratch_rtx)
-			      : gen_add2_insn (this_rtx, scratch_rtx));
-  if (frame_related_p)
-    {
-      RTX_FRAME_RELATED_P (insn) = frame_related_p;
-      rtx adj = plus_constant (mode, this_rtx, delta);
-      add_reg_note (insn , REG_CFA_ADJUST_CFA, gen_rtx_SET (this_rtx, adj));
-    }
+  /* SVE support will go here.  */
+  HOST_WIDE_INT constant = offset.to_constant ();
+  aarch64_add_offset_1 (mode, dest, src, constant, temp1,
+			frame_related_p, emit_move_imm);
 }
 
-static inline void
-aarch64_add_constant (scalar_int_mode mode, int regnum, int scratchreg,
-		      HOST_WIDE_INT delta)
-{
-  aarch64_add_constant_internal (mode, regnum, scratchreg, delta, false, true);
-}
+/* Add DELTA to the stack pointer, marking the instructions frame-related.
+   TEMP1 is available as a temporary if nonnull.  EMIT_MOVE_IMM is false
+   if TEMP1 already contains abs (DELTA).  */
 
 static inline void
-aarch64_add_sp (int scratchreg, HOST_WIDE_INT delta, bool emit_move_imm)
+aarch64_add_sp (rtx temp1, poly_int64 delta, bool emit_move_imm)
 {
-  aarch64_add_constant_internal (Pmode, SP_REGNUM, scratchreg, delta,
-				 true, emit_move_imm);
+  aarch64_add_offset (Pmode, stack_pointer_rtx, stack_pointer_rtx, delta,
+		      temp1, true, emit_move_imm);
 }
 
+/* Subtract DELTA from the stack pointer, marking the instructions
+   frame-related if FRAME_RELATED_P.  TEMP1 is available as a temporary
+   if nonnull.  */
+
 static inline void
-aarch64_sub_sp (int scratchreg, HOST_WIDE_INT delta, bool frame_related_p)
+aarch64_sub_sp (rtx temp1, poly_int64 delta, bool frame_related_p)
 {
-  aarch64_add_constant_internal (Pmode, SP_REGNUM, scratchreg, -delta,
-				 frame_related_p, true);
+  aarch64_add_offset (Pmode, stack_pointer_rtx, stack_pointer_rtx, -delta,
+		      temp1, frame_related_p);
 }
 
 void
@@ -2106,9 +2126,8 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
 	    {
 	      gcc_assert (can_create_pseudo_p ());
 	      base = aarch64_force_temporary (int_mode, dest, base);
-	      base = aarch64_add_offset (int_mode, NULL, base,
-					 INTVAL (offset));
-	      aarch64_emit_move (dest, base);
+	      aarch64_add_offset (int_mode, dest, base, INTVAL (offset),
+				  NULL_RTX, false);
 	      return;
 	    }
 
@@ -2147,9 +2166,8 @@ aarch64_expand_mov_immediate (rtx dest, rtx imm)
 	    {
 	      gcc_assert(can_create_pseudo_p ());
 	      base = aarch64_force_temporary (int_mode, dest, base);
-	      base = aarch64_add_offset (int_mode, NULL, base,
-					 INTVAL (offset));
-	      aarch64_emit_move (dest, base);
+	      aarch64_add_offset (int_mode, dest, base, INTVAL (offset),
+				  NULL_RTX, false);
 	      return;
 	    }
 	  /* FALLTHRU */
@@ -3626,11 +3644,10 @@ aarch64_set_handled_components (sbitmap components)
       cfun->machine->reg_is_wrapped_separately[regno] = true;
 }
 
-/* Allocate SIZE bytes of stack space using SCRATCH_REG as a scratch
-   register.  */
+/* Allocate SIZE bytes of stack space using TEMP1 as a scratch register.  */
 
 static void
-aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
+aarch64_allocate_and_probe_stack_space (rtx temp1, HOST_WIDE_INT size)
 {
   HOST_WIDE_INT probe_interval
     = 1 << PARAM_VALUE (PARAM_STACK_CLASH_PROTECTION_PROBE_INTERVAL);
@@ -3644,7 +3661,7 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
      We can allocate GUARD_SIZE - GUARD_USED_BY_CALLER as a single chunk
      without any probing.  */
   gcc_assert (size >= guard_size - guard_used_by_caller);
-  aarch64_sub_sp (scratchreg, guard_size - guard_used_by_caller, true);
+  aarch64_sub_sp (temp1, guard_size - guard_used_by_caller, true);
   HOST_WIDE_INT orig_size = size;
   size -= (guard_size - guard_used_by_caller);
 
@@ -3656,17 +3673,17 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
   if (rounded_size && rounded_size <= 4 * probe_interval)
     {
       /* We don't use aarch64_sub_sp here because we don't want to
-	 repeatedly load SCRATCHREG.  */
-      rtx scratch_rtx = gen_rtx_REG (Pmode, scratchreg);
+	 repeatedly load TEMP1.  */
+      rtx step = GEN_INT (-probe_interval);
       if (probe_interval > ARITH_FACTOR)
-	emit_move_insn (scratch_rtx, GEN_INT (-probe_interval));
-      else
-	scratch_rtx = GEN_INT (-probe_interval);
+	{
+	  emit_move_insn (temp1, step);
+	  step = temp1;
+	}
 
       for (HOST_WIDE_INT i = 0; i < rounded_size; i += probe_interval)
 	{
-	  rtx_insn *insn = emit_insn (gen_add2_insn (stack_pointer_rtx,
-						     scratch_rtx));
+	  rtx_insn *insn = emit_insn (gen_add2_insn (stack_pointer_rtx, step));
           add_reg_note (insn, REG_STACK_CHECK, const0_rtx);
 
 	  if (probe_interval > ARITH_FACTOR)
@@ -3687,10 +3704,10 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
   else if (rounded_size)
     {
       /* Compute the ending address.  */
-      rtx temp = gen_rtx_REG (word_mode, scratchreg);
-      emit_move_insn (temp, GEN_INT (-rounded_size));
+      unsigned int scratchreg = REGNO (temp1);
+      emit_move_insn (temp1, GEN_INT (-rounded_size));
       rtx_insn *insn
-	 = emit_insn (gen_add3_insn (temp, stack_pointer_rtx, temp));
+	 = emit_insn (gen_add3_insn (temp1, stack_pointer_rtx, temp1));
 
       /* For the initial allocation, we don't have a frame pointer
 	 set up, so we always need CFI notes.  If we're doing the
@@ -3705,7 +3722,7 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
 	  /* We want the CFA independent of the stack pointer for the
 	     duration of the loop.  */
 	  add_reg_note (insn, REG_CFA_DEF_CFA,
-			plus_constant (Pmode, temp,
+			plus_constant (Pmode, temp1,
 				       (rounded_size + (orig_size - size))));
 	  RTX_FRAME_RELATED_P (insn) = 1;
 	}
@@ -3715,7 +3732,7 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
 	 It also probes at a 4k interval regardless of the value of
 	 PARAM_STACK_CLASH_PROTECTION_PROBE_INTERVAL.  */
       insn = emit_insn (gen_probe_stack_range (stack_pointer_rtx,
-					       stack_pointer_rtx, temp));
+					       stack_pointer_rtx, temp1));
 
       /* Now reset the CFA register if needed.  */
       if (scratchreg == IP0_REGNUM || !frame_pointer_needed)
@@ -3736,7 +3753,7 @@ aarch64_allocate_and_probe_stack_space (int scratchreg, HOST_WIDE_INT size)
      Note that any residual must be probed.  */
   if (residual)
     {
-      aarch64_sub_sp (scratchreg, residual, true);
+      aarch64_sub_sp (temp1, residual, true);
       add_reg_note (get_last_insn (), REG_STACK_CHECK, const0_rtx);
       emit_stack_probe (plus_constant (Pmode, stack_pointer_rtx,
 				       (residual - GET_MODE_SIZE (word_mode))));
@@ -3827,6 +3844,9 @@ aarch64_expand_prologue (void)
 	aarch64_emit_probe_stack_range (get_stack_check_protect (), frame_size);
     }
 
+  rtx ip0_rtx = gen_rtx_REG (Pmode, IP0_REGNUM);
+  rtx ip1_rtx = gen_rtx_REG (Pmode, IP1_REGNUM);
+
   /* We do not fully protect aarch64 against stack clash style attacks
      as doing so would be prohibitively expensive with less utility over
      time as newer compilers are deployed.
@@ -3872,9 +3892,9 @@ aarch64_expand_prologue (void)
      outgoing args.  */
   if (flag_stack_clash_protection
       && initial_adjust >= guard_size - guard_used_by_caller)
-    aarch64_allocate_and_probe_stack_space (IP0_REGNUM, initial_adjust);
+    aarch64_allocate_and_probe_stack_space (ip0_rtx, initial_adjust);
   else
-    aarch64_sub_sp (IP0_REGNUM, initial_adjust, true);
+    aarch64_sub_sp (ip0_rtx, initial_adjust, true);
 
   if (callee_adjust != 0)
     aarch64_push_regs (reg1, reg2, callee_adjust);
@@ -3884,10 +3904,9 @@ aarch64_expand_prologue (void)
       if (callee_adjust == 0)
 	aarch64_save_callee_saves (DImode, callee_offset, R29_REGNUM,
 				   R30_REGNUM, false);
-      insn = emit_insn (gen_add3_insn (hard_frame_pointer_rtx,
-				       stack_pointer_rtx,
-				       GEN_INT (callee_offset)));
-      RTX_FRAME_RELATED_P (insn) = frame_pointer_needed;
+      aarch64_add_offset (Pmode, hard_frame_pointer_rtx,
+			  stack_pointer_rtx, callee_offset, ip1_rtx,
+			  frame_pointer_needed);
       emit_insn (gen_stack_tie (stack_pointer_rtx, hard_frame_pointer_rtx));
     }
 
@@ -3903,9 +3922,9 @@ aarch64_expand_prologue (void)
 	 less the amount of the guard reserved for use by the caller's
 	 outgoing args.  */
       if (final_adjust >= guard_size - guard_used_by_caller)
-	aarch64_allocate_and_probe_stack_space (IP1_REGNUM, final_adjust);
+	aarch64_allocate_and_probe_stack_space (ip1_rtx, final_adjust);
       else
-	aarch64_sub_sp (IP1_REGNUM, final_adjust, !frame_pointer_needed);
+	aarch64_sub_sp (ip1_rtx, final_adjust, !frame_pointer_needed);
 
       /* We must also probe if the final adjustment is larger than the guard
 	 that is assumed used by the caller.  This may be sub-optimal.  */
@@ -3918,7 +3937,7 @@ aarch64_expand_prologue (void)
 	}
     }
   else
-    aarch64_sub_sp (IP1_REGNUM, final_adjust, !frame_pointer_needed);
+    aarch64_sub_sp (ip1_rtx, final_adjust, !frame_pointer_needed);
 }
 
 /* Return TRUE if we can use a simple_return insn.
@@ -3974,17 +3993,16 @@ aarch64_expand_epilogue (bool for_sibcall)
 
   /* Restore the stack pointer from the frame pointer if it may not
      be the same as the stack pointer.  */
+  rtx ip0_rtx = gen_rtx_REG (Pmode, IP0_REGNUM);
+  rtx ip1_rtx = gen_rtx_REG (Pmode, IP1_REGNUM);
   if (frame_pointer_needed && (final_adjust || cfun->calls_alloca))
-    {
-      insn = emit_insn (gen_add3_insn (stack_pointer_rtx,
-				       hard_frame_pointer_rtx,
-				       GEN_INT (-callee_offset)));
-      /* If writeback is used when restoring callee-saves, the CFA
-	 is restored on the instruction doing the writeback.  */
-      RTX_FRAME_RELATED_P (insn) = callee_adjust == 0;
-    }
+    /* If writeback is used when restoring callee-saves, the CFA
+       is restored on the instruction doing the writeback.  */
+    aarch64_add_offset (Pmode, stack_pointer_rtx,
+			hard_frame_pointer_rtx, -callee_offset,
+			ip1_rtx, callee_adjust == 0);
   else
-    aarch64_add_sp (IP1_REGNUM, final_adjust,
+    aarch64_add_sp (ip1_rtx, final_adjust,
 		    /* A stack clash protection prologue may not have
 		       left IP1_REGNUM in a usable state.  */
 		    (flag_stack_clash_protection
@@ -4013,7 +4031,7 @@ aarch64_expand_epilogue (bool for_sibcall)
 
   /* A stack clash protection prologue may not have left IP0_REGNUM
      in a usable state.  */
-  aarch64_add_sp (IP0_REGNUM, initial_adjust,
+  aarch64_add_sp (ip0_rtx, initial_adjust,
 		  (flag_stack_clash_protection
 		   || df_regs_ever_live_p (IP0_REGNUM)));
 
@@ -4120,15 +4138,15 @@ aarch64_output_mi_thunk (FILE *file, tree thunk ATTRIBUTE_UNUSED,
   reload_completed = 1;
   emit_note (NOTE_INSN_PROLOGUE_END);
 
+  this_rtx = gen_rtx_REG (Pmode, this_regno);
+  temp0 = gen_rtx_REG (Pmode, IP0_REGNUM);
+  temp1 = gen_rtx_REG (Pmode, IP1_REGNUM);
+
   if (vcall_offset == 0)
-    aarch64_add_constant (Pmode, this_regno, IP1_REGNUM, delta);
+    aarch64_add_offset (Pmode, this_rtx, this_rtx, delta, temp1, false);
   else
     {
       gcc_assert ((vcall_offset & (POINTER_BYTES - 1)) == 0);
-
-      this_rtx = gen_rtx_REG (Pmode, this_regno);
-      temp0 = gen_rtx_REG (Pmode, IP0_REGNUM);
-      temp1 = gen_rtx_REG (Pmode, IP1_REGNUM);
 
       addr = this_rtx;
       if (delta != 0)
@@ -4137,7 +4155,8 @@ aarch64_output_mi_thunk (FILE *file, tree thunk ATTRIBUTE_UNUSED,
 	    addr = gen_rtx_PRE_MODIFY (Pmode, this_rtx,
 				       plus_constant (Pmode, this_rtx, delta));
 	  else
-	    aarch64_add_constant (Pmode, this_regno, IP1_REGNUM, delta);
+	    aarch64_add_offset (Pmode, this_rtx, this_rtx, delta, temp1,
+				false);
 	}
 
       if (Pmode == ptr_mode)
