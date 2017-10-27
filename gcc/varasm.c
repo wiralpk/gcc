@@ -3065,6 +3065,10 @@ const_hash_1 (const tree exp)
       return (const_hash_1 (TREE_OPERAND (exp, 0)) * 9
 	      + const_hash_1 (TREE_OPERAND (exp, 1)));
 
+    case VEC_SERIES_CST:
+      return (const_hash_1 (VEC_SERIES_CST_BASE (exp)) * 11
+	      + const_hash_1 (VEC_SERIES_CST_STEP (exp)));
+
     CASE_CONVERT:
       return const_hash_1 (TREE_OPERAND (exp, 0)) * 7 + 2;
 
@@ -3164,6 +3168,12 @@ compare_constant (const tree t1, const tree t2)
     case VEC_DUPLICATE_CST:
       return compare_constant (VEC_DUPLICATE_CST_ELT (t1),
 			       VEC_DUPLICATE_CST_ELT (t2));
+
+    case VEC_SERIES_CST:
+      return (compare_constant (VEC_SERIES_CST_BASE (t1),
+				VEC_SERIES_CST_BASE (t2))
+	      && compare_constant (VEC_SERIES_CST_STEP (t1),
+				   VEC_SERIES_CST_STEP (t2)));
 
     case CONSTRUCTOR:
       {

@@ -1037,6 +1037,7 @@ As this example indicates, the operands are zero-indexed.
 @tindex COMPLEX_CST
 @tindex VECTOR_CST
 @tindex VEC_DUPLICATE_CST
+@tindex VEC_SERIES_CST
 @tindex STRING_CST
 @findex TREE_STRING_LENGTH
 @findex TREE_STRING_POINTER
@@ -1097,6 +1098,18 @@ same scalar value.  At present only variable-length vectors use
 instead.  The scalar element value is given by
 @code{VEC_DUPLICATE_CST_ELT} and has the same restrictions as the
 element of a @code{VECTOR_CST}.
+
+@item VEC_SERIES_CST
+These nodes represent a vector constant in which element @var{i}
+has the value @samp{@var{base} + @var{i} * @var{step}}, for some
+constant @var{base} and @var{step}.  The value of @var{base} is
+given by @code{VEC_SERIES_CST_BASE} and the value of @var{step} is
+given by @code{VEC_SERIES_CST_STEP}.
+
+At present only variable-length vectors use @code{VEC_SERIES_CST};
+constant-length vectors use @code{VECTOR_CST} instead.  The nodes
+are also restricted to integral types, in order to avoid specifying
+the rounding behavior for floating-point types.
 
 @item STRING_CST
 These nodes represent string-constants.  The @code{TREE_STRING_LENGTH}
@@ -1702,6 +1715,7 @@ a value from @code{enum annot_expr_kind}.
 @node Vectors
 @subsection Vectors
 @tindex VEC_DUPLICATE_EXPR
+@tindex VEC_SERIES_EXPR
 @tindex VEC_LSHIFT_EXPR
 @tindex VEC_RSHIFT_EXPR
 @tindex VEC_WIDEN_MULT_HI_EXPR
@@ -1720,6 +1734,14 @@ a value from @code{enum annot_expr_kind}.
 @item VEC_DUPLICATE_EXPR
 This node has a single operand and represents a vector in which every
 element is equal to that operand.
+
+@item VEC_SERIES_EXPR
+This node represents a vector formed from a scalar base and step,
+given as the first and second operands respectively.  Element @var{i}
+of the result is equal to @samp{@var{base} + @var{i}*@var{step}}.
+
+This node is restricted to integral types, in order to avoid
+specifying the rounding behavior for floating-point types.
 
 @item VEC_LSHIFT_EXPR
 @itemx VEC_RSHIFT_EXPR

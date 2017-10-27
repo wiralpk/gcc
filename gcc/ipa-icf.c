@@ -1480,6 +1480,7 @@ sem_item::add_expr (const_tree exp, inchash::hash &hstate)
     case COMPLEX_CST:
     case VECTOR_CST:
     case VEC_DUPLICATE_CST:
+    case VEC_SERIES_CST:
       inchash::add_expr (exp, hstate);
       break;
     case CONSTRUCTOR:
@@ -2040,6 +2041,11 @@ sem_variable::equals (tree t1, tree t2)
     case VEC_DUPLICATE_CST:
       return sem_variable::equals (VEC_DUPLICATE_CST_ELT (t1),
 				   VEC_DUPLICATE_CST_ELT (t2));
+     case VEC_SERIES_CST:
+       return (sem_variable::equals (VEC_SERIES_CST_BASE (t1),
+				     VEC_SERIES_CST_BASE (t2))
+	       && sem_variable::equals (VEC_SERIES_CST_STEP (t1),
+					VEC_SERIES_CST_STEP (t2)));
     case ARRAY_REF:
     case ARRAY_RANGE_REF:
       {

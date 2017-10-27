@@ -787,6 +787,11 @@ print_node (FILE *file, const char *prefix, tree node, int indent,
 	  print_node (file, "elt", VEC_DUPLICATE_CST_ELT (node), indent + 4);
 	  break;
 
+	case VEC_SERIES_CST:
+	  print_node (file, "base", VEC_SERIES_CST_BASE (node), indent + 4);
+	  print_node (file, "step", VEC_SERIES_CST_STEP (node), indent + 4);
+	  break;
+
 	case COMPLEX_CST:
 	  print_node (file, "real", TREE_REALPART (node), indent + 4);
 	  print_node (file, "imag", TREE_IMAGPART (node), indent + 4);

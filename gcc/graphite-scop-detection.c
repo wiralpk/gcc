@@ -1213,6 +1213,7 @@ scan_tree_for_params (sese_info_p s, tree e)
     case COMPLEX_CST:
     case VECTOR_CST:
     case VEC_DUPLICATE_CST:
+    case VEC_SERIES_CST:
       break;
 
    default:

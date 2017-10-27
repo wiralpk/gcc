@@ -867,6 +867,7 @@ copy_reference_ops_from_ref (tree ref, vec<vn_reference_op_s> *result)
 	case COMPLEX_CST:
 	case VECTOR_CST:
 	case VEC_DUPLICATE_CST:
+	case VEC_SERIES_CST:
 	case REAL_CST:
 	case FIXED_CST:
 	case CONSTRUCTOR:
@@ -1060,6 +1061,7 @@ ao_ref_init_from_vn_reference (ao_ref *ref,
 	case COMPLEX_CST:
 	case VECTOR_CST:
 	case VEC_DUPLICATE_CST:
+	case VEC_SERIES_CST:
 	case REAL_CST:
 	case CONSTRUCTOR:
 	case CONST_DECL:

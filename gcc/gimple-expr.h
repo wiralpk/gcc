@@ -135,6 +135,7 @@ is_gimple_constant (const_tree t)
     case COMPLEX_CST:
     case VECTOR_CST:
     case VEC_DUPLICATE_CST:
+    case VEC_SERIES_CST:
     case STRING_CST:
       return true;
 

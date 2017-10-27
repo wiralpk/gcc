@@ -7708,7 +7708,7 @@ expand_operands (tree exp0, tree exp1, rtx target, rtx *op0, rtx *op1,
 
 
 /* Expand constant vector element ELT, which has mode MODE.  This is used
-   for members of VECTOR_CST and VEC_DUPLICATE_CST.  */
+   for members of VECTOR_CST, VEC_DUPLICATE_CST and VEC_SERIES_CST.  */
 
 static rtx
 const_vector_element (scalar_mode mode, const_tree elt)
@@ -9591,6 +9591,10 @@ expand_expr_real_2 (sepops ops, rtx target, machine_mode tmode,
       gcc_assert (target);
       return target;
 
+    case VEC_SERIES_EXPR:
+      expand_operands (treeop0, treeop1, NULL_RTX, &op0, &op1, modifier);
+      return expand_vec_series_expr (mode, op0, op1, target);
+
     case BIT_INSERT_EXPR:
       {
 	unsigned bitpos = tree_to_uhwi (treeop2);
@@ -10028,6 +10032,13 @@ expand_expr_real_1 (tree exp, rtx target, machine_mode tmode,
       op0 = const_vector_element (GET_MODE_INNER (mode),
 				  VEC_DUPLICATE_CST_ELT (exp));
       return gen_const_vec_duplicate (mode, op0);
+
+    case VEC_SERIES_CST:
+      op0 = const_vector_element (GET_MODE_INNER (mode),
+				  VEC_SERIES_CST_BASE (exp));
+      op1 = const_vector_element (GET_MODE_INNER (mode),
+				  VEC_SERIES_CST_STEP (exp));
+      return gen_const_vec_series (mode, op0, op1);
 
     case CONST_DECL:
       if (modifier == EXPAND_WRITE)

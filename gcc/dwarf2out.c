@@ -18913,6 +18913,7 @@ rtl_for_decl_init (tree init, tree type)
 	  {
 	  case VECTOR_CST:
 	  case VEC_DUPLICATE_CST:
+	  case VEC_SERIES_CST:
 	    break;
 	  case CONSTRUCTOR:
 	    if (TREE_CONSTANT (init))
