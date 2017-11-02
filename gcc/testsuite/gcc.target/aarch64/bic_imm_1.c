@@ -1,5 +1,5 @@
 /* { dg-do assemble } */
-/* { dg-options "-O2 --save-temps -ftree-vectorize" } */
+/* { dg-options "-O2 --save-temps -ftree-vectorize -march=armv8-a" } */
 
 /* Each function uses the correspoding 'CLASS' in
    Marco CHECK (aarch64_simd_valid_immediate).  */

@@ -1,5 +1,5 @@
 /* { dg-do compile } */
-/* { dg-options "-mstrict-align -O3" } */
+/* { dg-options "-mstrict-align -O3 -march=armv8-a" } */
 
 unsigned char foo(const unsigned char *buffer, unsigned int length)
 {
