@@ -5109,24 +5109,27 @@ expand_assignment (tree to, tree from, bool nontemporal)
       /* Handle expand_expr of a complex value returning a CONCAT.  */
       else if (GET_CODE (to_rtx) == CONCAT)
 	{
-	  unsigned short mode_bitsize = GET_MODE_BITSIZE (GET_MODE (to_rtx));
+	  machine_mode to_mode = GET_MODE (to_rtx);
+	  gcc_checking_assert (COMPLEX_MODE_P (to_mode));
+	  poly_int64 mode_bitsize = GET_MODE_BITSIZE (to_mode);
+	  unsigned short inner_bitsize = GET_MODE_UNIT_BITSIZE (to_mode);
 	  if (COMPLEX_MODE_P (TYPE_MODE (TREE_TYPE (from)))
 	      && must_eq (bitpos, 0)
 	      && must_eq (bitsize, mode_bitsize))
 	    result = store_expr (from, to_rtx, false, nontemporal, reversep);
-	  else if (must_eq (bitsize, mode_bitsize / 2)
+	  else if (must_eq (bitsize, inner_bitsize)
 		   && (must_eq (bitpos, 0)
-		       || must_eq (bitpos, mode_bitsize / 2)))
+		       || must_eq (bitpos, inner_bitsize)))
 	    result = store_expr (from, XEXP (to_rtx, may_ne (bitpos, 0)),
 				 false, nontemporal, reversep);
-	  else if (must_le (bitpos + bitsize, mode_bitsize / 2))
+	  else if (must_le (bitpos + bitsize, inner_bitsize))
 	    result = store_field (XEXP (to_rtx, 0), bitsize, bitpos,
 				  bitregion_start, bitregion_end,
 				  mode1, from, get_alias_set (to),
 				  nontemporal, reversep);
-	  else if (must_ge (bitpos, mode_bitsize / 2))
+	  else if (must_ge (bitpos, inner_bitsize))
 	    result = store_field (XEXP (to_rtx, 1), bitsize,
-				  bitpos - mode_bitsize / 2,
+				  bitpos - inner_bitsize,
 				  bitregion_start, bitregion_end,
 				  mode1, from, get_alias_set (to),
 				  nontemporal, reversep);
@@ -5134,7 +5137,7 @@ expand_assignment (tree to, tree from, bool nontemporal)
 	    {
 	      rtx from_rtx;
 	      result = expand_normal (from);
-	      from_rtx = simplify_gen_subreg (GET_MODE (to_rtx), result,
+	      from_rtx = simplify_gen_subreg (to_mode, result,
 					      TYPE_MODE (TREE_TYPE (from)), 0);
 	      emit_move_insn (XEXP (to_rtx, 0),
 			      read_complex_part (from_rtx, false));
