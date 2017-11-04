@@ -10348,16 +10348,14 @@ static bool
 aarch64_legitimate_constant_p (machine_mode mode, rtx x)
 {
   /* Support CSE and rematerialization of common constants.  */
-  if (CONST_INT_P (x) || CONST_DOUBLE_P (x) || GET_CODE (x) == CONST_VECTOR)
+  if (CONST_SCALAR_INT_P (x)
+      || CONST_DOUBLE_P (x)
+      || GET_CODE (x) == CONST_VECTOR)
     return true;
 
   /* Do not allow vector struct mode constants.  We could support
      0 and -1 easily, but they need support in aarch64-simd.md.  */
   if (aarch64_vect_struct_mode_p (mode))
-    return false;
-
-  /* Do not allow wide int constants - this requires support in movti.  */
-  if (CONST_WIDE_INT_P (x))
     return false;
 
   /* Do not allow const (plus (anchor_symbol, const_int)).  */
