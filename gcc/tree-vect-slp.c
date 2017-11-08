@@ -214,10 +214,10 @@ vect_get_place_in_interleaving_chain (gimple *stmt, gimple *first_stmt)
    (if nonnull) and the type of each intermediate vector in *VECTOR_TYPE_OUT
    (if nonnull).  */
 
-static bool
+bool
 can_duplicate_and_interleave_p (unsigned int count, machine_mode elt_mode,
-				unsigned int *nvectors_out = NULL,
-				tree *vector_type_out = NULL)
+				unsigned int *nvectors_out,
+				tree *vector_type_out)
 {
   poly_int64 elt_bytes = count * GET_MODE_SIZE (elt_mode);
   poly_int64 nelts;
@@ -3277,7 +3277,7 @@ vect_mask_constant_operand_p (gimple *stmt, int opnum)
    We try to find the largest IM for which this sequence works, in order
    to cut down on the number of interleaves.  */
 
-static void
+void
 duplicate_and_interleave (gimple_seq *seq, tree vector_type, vec<tree> elts,
 			  unsigned int nresults, vec<tree> &results)
 {
@@ -3559,6 +3559,26 @@ vect_get_constant_vectors (tree op, slp_tree slp_node,
 	      if (must_eq (TYPE_VECTOR_SUBPARTS (vector_type), nunits))
 		/* Build the vector directly from ELTS.  */
 		vec_cst = gimple_build_vector (&ctor_seq, vector_type, elts);
+	      else if (neutral_op)
+		{
+		  /* Build a vector of the neutral value and shift the
+		     other elements into place.  */
+		  vec_cst = gimple_build_vector_from_val (&ctor_seq,
+							  vector_type,
+							  neutral_op);
+		  int k = nunits;
+		  while (k > 0 && elts[k - 1] == neutral_op)
+		    k -= 1;
+		  while (k > 0)
+		    {
+		      k -= 1;
+		      gcall *call = gimple_build_call_internal
+			(IFN_VEC_SHL_INSERT, 2, vec_cst, elts[k]);
+		      vec_cst = make_ssa_name (vector_type);
+		      gimple_call_set_lhs (call, vec_cst);
+		      gimple_seq_add_stmt (&ctor_seq, call);
+		    }
+		}
 	      else
 		{
 		  if (vec_oprnds->is_empty ())
