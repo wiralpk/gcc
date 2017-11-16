@@ -166,6 +166,9 @@ optab_for_tree_code (enum tree_code code, const_tree type,
     case REDUC_XOR_EXPR:
       return reduc_xor_scal_optab;
 
+    case FOLD_LEFT_PLUS_EXPR:
+      return fold_left_plus_optab;
+
     case VEC_WIDEN_MULT_HI_EXPR:
       return TYPE_UNSIGNED (type) ?
 	vec_widen_umult_hi_optab : vec_widen_smult_hi_optab;

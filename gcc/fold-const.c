@@ -1603,6 +1603,32 @@ const_binop (enum tree_code code, tree arg1, tree arg2)
 	return NULL_TREE;
       return build_vector_from_val (TREE_TYPE (arg1), sub);
     }
+
+  if (CONSTANT_CLASS_P (arg1)
+      && TREE_CODE (arg2) == VECTOR_CST)
+    {
+      tree_code subcode;
+
+      switch (code)
+	{
+	case FOLD_LEFT_PLUS_EXPR:
+	  subcode = PLUS_EXPR;
+	  break;
+	default:
+	  return NULL_TREE;
+	}
+
+      int nelts = VECTOR_CST_NELTS (arg2);
+      tree accum = arg1;
+      for (int i = 0; i < nelts; i++)
+	{
+	  accum = const_binop (subcode, accum, VECTOR_CST_ELT (arg2, i));
+	  if (accum == NULL_TREE || !CONSTANT_CLASS_P (accum))
+	    return NULL_TREE;
+	}
+
+      return accum;
+    }
   return NULL_TREE;
 }
 

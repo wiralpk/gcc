@@ -46,5 +46,9 @@ int main (void)
   return 0;
 }
 
-/* { dg-final { scan-tree-dump-times "Detected reduction\\." 2 "vect"  } } */
+/* 2 for the first loop.  */
+/* { dg-final { scan-tree-dump-times "Detected reduction\\." 3 "vect" { target { ! vect_multiple_sizes } } } } */
+/* { dg-final { scan-tree-dump "Detected reduction\\." "vect" { target vect_multiple_sizes } } } */
+/* { dg-final { scan-tree-dump-times "not vectorized" 1 "vect" { target { ! vect_multiple_sizes } } } } */
+/* { dg-final { scan-tree-dump "not vectorized" "vect" { target vect_multiple_sizes } } } */
 /* { dg-final { scan-tree-dump-times "vectorized 2 loops" 1 "vect" { target { ! vect_no_int_min_max } } } } */

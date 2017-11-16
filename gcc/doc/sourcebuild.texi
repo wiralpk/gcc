@@ -1580,6 +1580,9 @@ Target supports AND, IOR and XOR reduction on vectors.
 
 @item vect_fold_extract_last
 Target supports the @code{fold_extract_last} optab.
+
+@item vect_fold_left_plus
+Target supports the @code{fold_left_plus} optab.
 @end table
 
 @subsubsection Thread Local Storage attributes

@@ -7180,6 +7180,12 @@ proc check_effective_target_vect_fold_extract_last { } {
     return [check_effective_target_aarch64_sve]
 }
 
+# Return 1 if the target supports the fold_left_plus optab.
+
+proc check_effective_target_vect_fold_left_plus { } {
+    return [check_effective_target_aarch64_sve]
+}
+
 # Return 1 if the target supports section-anchors
 
 proc check_effective_target_section_anchors { } {

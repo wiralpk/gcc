@@ -5415,6 +5415,10 @@ vectorizable_operation (gimple *stmt, gimple_stmt_iterator *gsi,
 
   code = gimple_assign_rhs_code (stmt);
 
+  /* Ignore operations that mix scalar and vector input operands.  */
+  if (code == FOLD_LEFT_PLUS_EXPR)
+    return false;
+
   /* For pointer addition, we should use the normal plus for
      the vector addition.  */
   if (code == POINTER_PLUS_EXPR)

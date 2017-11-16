@@ -1746,6 +1746,7 @@ a value from @code{enum annot_expr_kind}.
 @tindex REDUC_AND_EXPR
 @tindex REDUC_IOR_EXPR
 @tindex REDUC_XOR_EXPR
+@tindex FOLD_LEFT_PLUS_EXPR
 
 @table @code
 @item VEC_DUPLICATE_EXPR
@@ -1861,6 +1862,12 @@ the maximum element in @var{x}.  The associativity of the operation
 is unspecified; for example, @samp{REDUC_PLUS_EXPR <@var{x}>} could
 sum floating-point @var{x} in forward order, in reverse order,
 using a tree, or in some other way.
+
+@item FOLD_LEFT_PLUS_EXPR
+This node takes two arguments: a scalar of type @var{t} and a vector
+of @var{t}s.  It successively adds each element of the vector to the
+scalar and returns the result.  The operation is strictly in-order:
+there is no reassociation.
 @end table
 
 
