@@ -5021,15 +5021,18 @@ vect_create_destination_var (tree scalar_dest, tree vectype)
     : vect_scalar_var;
   type = vectype ? vectype : TREE_TYPE (scalar_dest);
 
-  gcc_assert (TREE_CODE (scalar_dest) == SSA_NAME);
-
-  name = get_name (scalar_dest);
-  if (name)
-    new_name = xasprintf ("%s_%u", name, SSA_NAME_VERSION (scalar_dest));
+  if (TREE_CODE (scalar_dest) == SSA_NAME)
+    {
+      name = get_name (scalar_dest);
+      if (name)
+	new_name = xasprintf ("%s_%u", name, SSA_NAME_VERSION (scalar_dest));
+      else
+	new_name = xasprintf ("_%u", SSA_NAME_VERSION (scalar_dest));
+      vec_dest = vect_get_new_vect_var (type, kind, new_name);
+      free (new_name);
+    }
   else
-    new_name = xasprintf ("_%u", SSA_NAME_VERSION (scalar_dest));
-  vec_dest = vect_get_new_vect_var (type, kind, new_name);
-  free (new_name);
+    vec_dest = vect_get_new_vect_var (type, kind, NULL);
 
   return vec_dest;
 }
