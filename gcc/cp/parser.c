@@ -15690,6 +15690,42 @@ cp_parser_type_parameter (cp_parser* parser, bool *is_parameter_pack)
   return parameter;
 }
 
+/* If concepts are enabled and TEMPL does not identify a template
+   class, report occurrences of auto types in ARGUMENTS.  Return TRUE
+   if any such errors were reported.  */
+
+static bool
+cp_parser_check_for_auto_in_templ_arguments (cp_parser *parser ATTRIBUTE_UNUSED,
+					     tree templ,
+					     tree arguments)
+{
+  if (!flag_concepts)
+    return false;
+
+  if (! identifier_p (templ)
+      && (DECL_TYPE_TEMPLATE_P (templ)
+	  || DECL_TEMPLATE_TEMPLATE_PARM_P (templ)))
+    return false;
+
+  if (!arguments || TREE_CODE (arguments) != TREE_VEC)
+    return false;
+
+  bool errors = false;
+
+  for (int i = 0; i < TREE_VEC_LENGTH (arguments); i++)
+    {
+      tree xauto = type_uses_auto (TREE_VEC_ELT (arguments, i));
+      if (xauto)
+	{
+	  error_at (DECL_SOURCE_LOCATION (TEMPLATE_TYPE_DECL (xauto)),
+		    "invalid use of %<auto%> in template argument");
+	  errors = true;
+	}
+    }
+
+  return errors;
+}
+
 /* Parse a template-id.
 
    template-id:
@@ -15831,8 +15867,11 @@ cp_parser_template_id (cp_parser *parser,
   location_t combined_loc
     = make_location (token->location, token->location, finish_loc);
 
+  if (cp_parser_check_for_auto_in_templ_arguments (parser, templ,
+						   arguments))
+    template_id = error_mark_node;
   /* Build a representation of the specialization.  */
-  if (identifier_p (templ))
+  else if (identifier_p (templ))
     template_id = build_min_nt_loc (combined_loc,
 				    TEMPLATE_ID_EXPR,
 				    templ, arguments);
